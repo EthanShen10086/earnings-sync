@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EthanShen10086/earnings-sync/internal/acquire"
 	"github.com/EthanShen10086/earnings-sync/internal/app"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/notify"
@@ -74,31 +75,37 @@ func TestLiveApple2026Q4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(root, "testdata", "aapl_2026q4.csv"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 170*time.Second)
 	defer cancel()
-	job, err := pipe.Ingest(ctx, pipeline.Request{
-		Ticker:   "AAPL",
-		Filename: "aapl_2026q4.csv",
-		Body:     body,
-	})
+	filing, ok, err := acquire.LatestFinancials(ctx, nil, "", "0000320193", settings.SECUserAgent, 9)
+	if err != nil || !ok || filing.Form != "8-K" {
+		t.Fatalf("latest filing %+v %v %v", filing, ok, err)
+	}
+	exhibit, err := acquire.ExhibitURL(ctx, nil, "0000320193", filing.Accession, settings.SECUserAgent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != "succeeded" || job.DryRun || !job.Notified || job.Cells < 15 {
-		t.Fatalf("status=%s dry=%v cells=%d notified=%v err=%s", job.Status, job.DryRun, job.Cells, job.Notified, job.Error)
+	job, err := pipe.Ingest(ctx, pipeline.Request{Ticker: "AAPL", URL: exhibit, Force: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if job.Extraction == nil || job.Extraction.Period.Label() != "2026Q4" {
-		t.Fatalf("period %+v", job.Extraction)
+	if job.Status != "succeeded" || job.DryRun || !job.Notified || job.Extraction == nil || job.Extraction.Period.Label() != "2026Q4" {
+		t.Fatalf("status=%s dry=%v period=%v notified=%v err=%s", job.Status, job.DryRun, job.Extraction, job.Notified, job.Error)
+	}
+	cash, _ := job.Extraction.Number("cash")
+	equity, _ := job.Extraction.Number("equity")
+	rev, _ := job.Extraction.Number("total_revenue")
+	if cash < 36 || cash > 37 || equity < 110 || equity > 114 || rev < 114 || rev > 115 {
+		t.Fatalf("cash %v equity %v revenue %v", cash, equity, rev)
+	}
+	if len(job.Takeaway) < 4 {
+		t.Fatalf("analysis %v", job.Takeaway)
 	}
 	g, err := sheet.NewGoogle(ctx, settings.GoogleCreds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := g.Values(ctx, "1ePLqJ8emZAZ-cYp90w5TvA8ptAxjLFr2CcrL9zQWEE0", "利润表!A2:J80")
+	values, err := g.Values(ctx, "1ePLqJ8emZAZ-cYp90w5TvA8ptAxjLFr2CcrL9zQWEE0", "资产负债表!A2:X80")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,24 +113,66 @@ func TestLiveApple2026Q4(t *testing.T) {
 	for _, row := range values {
 		year, yok := sheet.AsInt(row, 0)
 		quarter, qok := sheet.AsInt(row, 1)
-		if !yok || !qok || year != 2026 || quarter != 4 || len(row) < 10 {
+		if !yok || !qok || year != 2026 || quarter != 4 || len(row) < 24 {
 			continue
 		}
-		rev, okNum := row[9].(float64)
-		if !okNum {
-			if s, ok := row[9].(string); ok {
-				if n, err := strconv.ParseFloat(s, 64); err == nil {
-					rev, okNum = n, true
-				}
-			}
-		}
-		if !okNum || rev < 114.47 || rev > 114.49 {
-			t.Fatalf("2026Q4 revenue cell %#v", row[9])
+		got := number(row[3])
+		if got < 36 || got > 37 {
+			t.Fatalf("balance cash %#v", row[3])
 		}
 		found = true
 	}
 	if !found {
-		t.Fatal("2026Q4 row was not written")
+		t.Fatal("2026Q4 balance sheet row was not written")
 	}
-	t.Logf("2026Q4 cells=%d notified=%v", job.Cells, job.Notified)
+	t.Logf("2026Q4 cells=%d cash=%.2f equity=%.2f", job.Cells, cash, equity)
+	for _, line := range job.Takeaway {
+		t.Log(line)
+	}
+}
+
+func TestLiveAnalysisCharts(t *testing.T) {
+	if os.Getenv("EARNINGS_LIVE") == "" {
+		t.Skip("设置 EARNINGS_LIVE=1 才把分析图写进真实表格")
+	}
+	config.LoadDotEnv(filepath.Join("..", "..", ".env"))
+	settings := config.LoadSettings()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	g, err := sheet.NewGoogle(ctx, settings.GoogleCreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := g.ApplyCharts(ctx, "1ePLqJ8emZAZ-cYp90w5TvA8ptAxjLFr2CcrL9zQWEE0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardware := number(mustCell(t, g, ctx, "利润表!B121"))
+	cashSec := number(mustCell(t, g, ctx, "资产负债表!B121"))
+	ocf := number(mustCell(t, g, ctx, "现金流量表!B121"))
+	if hardware < 80 || hardware > 85 || cashSec < 130 || cashSec > 145 || ocf < 27 || ocf > 30 {
+		t.Fatalf("hardware %.2f cash+securities %.2f ocf %.2f charts_added %d", hardware, cashSec, ocf, n)
+	}
+	t.Logf("charts_added=%d hardware=%.2f cash_securities=%.2f ocf=%.2f", n, hardware, cashSec, ocf)
+}
+
+func mustCell(t *testing.T, g *sheet.Google, ctx context.Context, a1 string) any {
+	t.Helper()
+	vals, err := g.Values(ctx, "1ePLqJ8emZAZ-cYp90w5TvA8ptAxjLFr2CcrL9zQWEE0", a1)
+	if err != nil || len(vals) == 0 || len(vals[0]) == 0 {
+		t.Fatalf("%s %v", a1, err)
+	}
+	return vals[0][0]
+}
+
+func number(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case string:
+		f, _ := strconv.ParseFloat(n, 64)
+		return f
+	default:
+		return 0
+	}
 }
