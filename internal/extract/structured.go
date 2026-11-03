@@ -2,24 +2,34 @@ package extract
 
 import (
 	"encoding/csv"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 )
 
-// TryStructured reads a long-form csv of fiscal_year,fiscal_quarter,line_item,value,unit.
+// TryStructured reads a long-form csv. When several quarters are present, it returns the latest one.
 func TryStructured(text, filename string) (model.Extraction, bool) {
+	all, ok := TryStructuredAll(text, filename)
+	if !ok {
+		return model.Extraction{}, false
+	}
+	return all[len(all)-1], true
+}
+
+// TryStructuredAll groups a long-form csv into one extraction per fiscal quarter, oldest first.
+func TryStructuredAll(text, filename string) ([]model.Extraction, bool) {
 	if !strings.Contains(strings.ToLower(filename+" "+text[:min(200, len(text))]), "line_item") &&
 		!strings.HasSuffix(strings.ToLower(filename), ".csv") {
-		return model.Extraction{}, false
+		return nil, false
 	}
 	r := csv.NewReader(strings.NewReader(text))
 	r.FieldsPerRecord = -1
 	r.TrimLeadingSpace = true
 	rows, err := r.ReadAll()
 	if err != nil || len(rows) < 2 {
-		return model.Extraction{}, false
+		return nil, false
 	}
 	header := map[string]int{}
 	for i, h := range rows[0] {
@@ -28,9 +38,11 @@ func TryStructured(text, filename string) (model.Extraction, bool) {
 	itemCol, okItem := header["line_item"]
 	valueCol, okValue := header["value"]
 	if !okItem || !okValue {
-		return model.Extraction{}, false
+		return nil, false
 	}
-	var ex model.Extraction
+	type key struct{ year, quarter int }
+	order := []key{}
+	grouped := map[key]*model.Extraction{}
 	for _, row := range rows[1:] {
 		if itemCol >= len(row) || valueCol >= len(row) {
 			continue
@@ -39,11 +51,18 @@ func TryStructured(text, filename string) (model.Extraction, bool) {
 		if item == "" {
 			continue
 		}
-		if col, ok := header["fiscal_year"]; ok && col < len(row) && ex.Period.FiscalYear == 0 {
-			ex.Period.FiscalYear, _ = strconv.Atoi(strings.TrimSpace(row[col]))
+		k := key{}
+		if col, ok := header["fiscal_year"]; ok && col < len(row) {
+			k.year, _ = strconv.Atoi(strings.TrimSpace(row[col]))
 		}
-		if col, ok := header["fiscal_quarter"]; ok && col < len(row) && ex.Period.FiscalQuarter == 0 {
-			ex.Period.FiscalQuarter, _ = strconv.Atoi(strings.TrimSpace(row[col]))
+		if col, ok := header["fiscal_quarter"]; ok && col < len(row) {
+			k.quarter, _ = strconv.Atoi(strings.TrimSpace(row[col]))
+		}
+		ex := grouped[k]
+		if ex == nil {
+			ex = &model.Extraction{Period: model.Period{FiscalYear: k.year, FiscalQuarter: k.quarter}}
+			grouped[k] = ex
+			order = append(order, k)
 		}
 		unit := model.UnitBillionUSD
 		if col, ok := header["unit"]; ok && col < len(row) && strings.TrimSpace(row[col]) != "" {
@@ -63,10 +82,27 @@ func TryStructured(text, filename string) (model.Extraction, bool) {
 		}
 		ex.Facts = append(ex.Facts, fact)
 	}
-	if !ex.Period.Valid() || len(ex.Facts) == 0 {
-		return model.Extraction{}, false
+	if len(order) == 0 {
+		return nil, false
 	}
-	return ex, true
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if a.year != b.year {
+			return a.year < b.year
+		}
+		return a.quarter < b.quarter
+	})
+	out := make([]model.Extraction, 0, len(order))
+	for _, k := range order {
+		ex := grouped[k]
+		if ex.Period.Valid() && len(ex.Facts) > 0 {
+			out = append(out, *ex)
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
 func min(a, b int) int {

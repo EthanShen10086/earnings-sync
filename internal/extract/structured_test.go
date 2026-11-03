@@ -42,3 +42,15 @@ func TestScaleMillionsAndPercent(t *testing.T) {
 		t.Fatalf("yoy %v", yoy)
 	}
 }
+
+func TestStructuredKeepsEveryQuarter(t *testing.T) {
+	text := "fiscal_year,fiscal_quarter,line_item,value,unit\n2026,3,total_revenue,90,billion_usd\n2026,4,total_revenue,114.48,billion_usd\n"
+	all, ok := TryStructuredAll(text, "x.csv")
+	if !ok || len(all) != 2 || all[0].Period.Label() != "2026Q3" || all[1].Period.Label() != "2026Q4" {
+		t.Fatalf("%v %+v", ok, all)
+	}
+	latest, ok := TryStructured(text, "x.csv")
+	if !ok || latest.Period.Label() != "2026Q4" {
+		t.Fatalf("latest %+v", latest)
+	}
+}
