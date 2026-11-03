@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -92,6 +93,7 @@ func (p HTTPProvider) Chat(ctx context.Context, messages []ChatMessage, tools []
 			ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments,
 		})
 	}
+	slog.Info("deepseek tool call", "model", p.AgentModel(), "tokens", parsed.Usage.TotalTokens, "tools", len(turn.ToolCalls))
 	return turn, TokenUsage{Total: parsed.Usage.TotalTokens}, nil
 }
 

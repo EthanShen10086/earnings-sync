@@ -132,8 +132,27 @@ func normalizeItem(s string) string {
 		return "gross_margin"
 	case "eps", "diluted_eps_usd":
 		return "diluted_eps"
-	case "ocf", "cash_from_operations":
+	case "ocf", "cash_from_operations", "cash_and_cash_equivalents":
+		if s == "cash_and_cash_equivalents" {
+			return "cash"
+		}
 		return "operating_cash_flow"
+	case "cash":
+		return "cash"
+	case "marketable_securities_current", "short_term_marketable_securities":
+		return "short_term_investments"
+	case "accounts_receivable", "accounts_receivable_net":
+		return "receivables"
+	case "inventories":
+		return "inventory"
+	case "marketable_securities_noncurrent", "long_term_marketable_securities":
+		return "long_term_investments"
+	case "property_plant_and_equipment_net", "ppe":
+		return "ppe_net"
+	case "shareholders_equity", "stockholders_equity", "total_shareholders_equity":
+		return "equity"
+	case "commercial_paper_and_current_term_debt":
+		return "short_term_debt"
 	case "capital_expenditure", "purchases_of_ppe":
 		return "capex"
 	case "fcf":
@@ -174,6 +193,12 @@ func scale(item string, n float64, unit string) float64 {
 	case model.UnitUSD:
 		return n / 1e9
 	default:
+		if n >= 1e6 || n <= -1e6 {
+			return n / 1e9
+		}
+		if n >= 1000 || n <= -1000 {
+			return n / 1000
+		}
 		return n
 	}
 }

@@ -20,7 +20,7 @@ func TestMessageStartsWithTakeaway(t *testing.T) {
 		Warnings: nil,
 		SheetURL: "https://docs.google.com/spreadsheets/d/abc",
 	}.Text()
-	if text[:12] == "" || !contains(text, "需要关注") || !contains(text, "服务收入继续抬高毛利率") {
+	if text[:12] == "" || !contains(text, "解读") || !contains(text, "服务收入继续抬高毛利率") {
 		t.Fatal(text)
 	}
 	if !contains(text, "未发现勾稽差异") || !contains(text, "/abc") {

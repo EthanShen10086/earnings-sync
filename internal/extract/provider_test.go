@@ -15,7 +15,7 @@ func TestHTTPProvider(t *testing.T) {
 			t.Errorf("auth %s", r.Header.Get("Authorization"))
 		}
 		b, _ := io.ReadAll(r.Body)
-		if !strings.Contains(string(b), "deepseek-chat") {
+		if !strings.Contains(string(b), "deepseek-flash") {
 			t.Fatalf("body %s", b)
 		}
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true}"}}],"usage":{"total_tokens":12}}`))

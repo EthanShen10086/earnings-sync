@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -44,11 +45,11 @@ func (p HTTPProvider) Complete(ctx context.Context, system, user string) (string
 	}
 	client := p.Client
 	if client == nil {
-		client = &http.Client{Timeout: 90 * time.Second}
+		client = &http.Client{Timeout: 150 * time.Second}
 	}
 	base := strings.TrimRight(p.BaseURL, "/")
 	payload := map[string]any{
-		"model": p.Model,
+		"model": p.AgentModel(),
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
@@ -94,6 +95,7 @@ func (p HTTPProvider) Complete(ctx context.Context, system, user string) (string
 	if len(parsed.Choices) == 0 {
 		return "", TokenUsage{}, fmt.Errorf("model returned no choices")
 	}
+	slog.Info("deepseek completion", "model", p.AgentModel(), "tokens", parsed.Usage.TotalTokens)
 	return parsed.Choices[0].Message.Content, TokenUsage{Total: parsed.Usage.TotalTokens}, nil
 }
 

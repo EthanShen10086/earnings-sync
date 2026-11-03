@@ -11,13 +11,21 @@ import (
 )
 
 const extractSystem = `你是财报结构化抽取器。只输出 JSON，不要解释。
-金额统一换算成十亿美元（billion_usd）。毛利率和同比用小数（17% 写成 0.17）。
+阅读英文财报正文，抽出最近一个财季的三张表。金额用十亿美元（billion_usd），毛利率和同比用小数（17% 写成 0.17）。
+利润表和分部收入只用「最近三个月 / Three Months Ended」那一列，不要用十二个月累计，也不要用上年同期列。
+资产负债表只用最近一个报告日那一列。
+现金流量表如果只有十二个月累计、没有单季列，就不要填写现金流字段，不要把全年数写进这个财季。
+短期借款 short_term_debt = 商业票据 + 一年内到期的长期债务。
+other_noncurrent_assets = 无形资产 + 其他非流动资产。
 无法确定的字段省略，不要猜 0。
+同时用简体中文写 analysis，6 到 8 条，每条不超过 80 字，依次覆盖：这季异常好的数据、异常坏的数据、业务结构、靠什么赚钱、资产负债表健康度、公司质地。只根据正文，不要编造。
 JSON 形状：
-{"fiscal_year":2026,"fiscal_quarter":4,"facts":[{"line_item":"total_revenue","value":114.48,"unit":"billion_usd"}]}
+{"periods":[{"fiscal_year":2026,"fiscal_quarter":4,"facts":[{"line_item":"total_revenue","value":114.48,"unit":"billion_usd"},{"line_item":"cash","value":36.31,"unit":"billion_usd"}]}],"analysis":["好：……","坏：……","结构：……","赚钱：……","负债表：……","质地：……"]}
 line_item 只用这些键：total_revenue, iphone_revenue, mac_revenue, ipad_revenue, wearables_revenue, services_revenue, gross_margin, net_income, diluted_eps, iphone_units, iphone_yoy, mac_yoy, ipad_yoy, wearables_yoy, services_yoy, cash, short_term_investments, receivables, inventory, other_current_assets, long_term_investments, ppe_net, other_noncurrent_assets, accounts_payable, short_term_debt, deferred_revenue, other_current_liabilities, long_term_debt, other_noncurrent_liabilities, equity, operating_cash_flow, capex, free_cash_flow, capital_return, dividend_per_share, depreciation, other_operating, other_investing, other_financing, note`
 
-const takeawaySystem = `你是买方研究员。根据下面的财季数字，用简体中文写 3 到 5 条最值得关注的变化。每条不超过 40 个字。只输出 JSON：{"takeaway":["..."]}`
+const takeawaySystem = `你是买方研究员。根据下面已经换算好的财季数字，用简体中文写 6 条解读，每条不超过 70 字。
+依次覆盖：这季异常好的一点、异常坏的一点、收入结构、公司靠什么赚钱、资产负债表健康度、公司质地。
+只根据给定数字，不要编造。只输出 JSON：{"takeaway":["..."]}`
 
 // Extractor turns a document into facts. Structured files skip the model; prose uses it.
 type Extractor struct {
@@ -33,10 +41,10 @@ func (e Extractor) FromDocument(ctx context.Context, doc model.Document, company
 		return model.Extraction{}, TokenUsage{}, fmt.Errorf("document is not a structured table and no model is configured")
 	}
 	text := doc.Text
-	if len(text) > 60000 {
-		text = text[:60000]
+	if len(text) > 24000 {
+		text = text[:24000]
 	}
-	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。若文中能判断财年财季，以文中为准。提示期间：%s\n\n%s",
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准，不要被文件发布日期带偏。提示期间：%s\n\n%s",
 		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), text)
 	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
 	if err != nil {
@@ -44,6 +52,37 @@ func (e Extractor) FromDocument(ctx context.Context, doc model.Document, company
 	}
 	ex, err := decodeModel(StripFence(raw), company.Ticker)
 	return ex, usage, err
+}
+
+// ParseReport reads an English filing once and returns every extracted quarter plus the Chinese reading.
+func (e Extractor) ParseReport(ctx context.Context, doc model.Document, company config.Company, hint model.Period) ([]model.Extraction, []string, TokenUsage, error) {
+	if e.Model == nil {
+		return nil, nil, TokenUsage{}, fmt.Errorf("document is not a structured table and no model is configured")
+	}
+	text := doc.Text
+	if len(text) > 24000 {
+		text = text[:24000]
+	}
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准。提示期间：%s\n\n%s",
+		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), text)
+	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
+	if err != nil {
+		return nil, nil, usage, err
+	}
+	periods, analysis, err := decodeReport(StripFence(raw), company.Ticker)
+	return periods, analysis, usage, err
+}
+
+// MissingCore lists balance-sheet and income fields a real filing parse must contain.
+func MissingCore(ex model.Extraction) []string {
+	need := []string{"total_revenue", "net_income", "cash", "receivables", "inventory", "equity", "accounts_payable", "long_term_debt"}
+	var miss []string
+	for _, item := range need {
+		if _, ok := ex.Number(item); !ok {
+			miss = append(miss, item)
+		}
+	}
+	return miss
 }
 
 func (e Extractor) Takeaway(ctx context.Context, ex model.Extraction, warnings []string) ([]string, TokenUsage, error) {
@@ -65,44 +104,100 @@ func (e Extractor) Takeaway(ctx context.Context, ex model.Extraction, warnings [
 }
 
 func decodeModel(raw, ticker string) (model.Extraction, error) {
+	periods, _, err := decodeReport(raw, ticker)
+	if err != nil {
+		return model.Extraction{}, err
+	}
+	return periods[len(periods)-1], nil
+}
+
+func decodeReport(raw, ticker string) ([]model.Extraction, []string, error) {
 	var parsed struct {
-		FiscalYear    int `json:"fiscal_year"`
-		FiscalQuarter int `json:"fiscal_quarter"`
-		Facts         []struct {
-			LineItem string   `json:"line_item"`
-			Value    *float64 `json:"value"`
-			Text     string   `json:"text"`
-			Unit     string   `json:"unit"`
-		} `json:"facts"`
+		Periods []struct {
+			FiscalYear    int          `json:"fiscal_year"`
+			FiscalQuarter int          `json:"fiscal_quarter"`
+			Facts         []parsedFact `json:"facts"`
+		} `json:"periods"`
+		FiscalYear    int          `json:"fiscal_year"`
+		FiscalQuarter int          `json:"fiscal_quarter"`
+		Facts         []parsedFact `json:"facts"`
+		Analysis      []string     `json:"analysis"`
+		Takeaway      []string     `json:"takeaway"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return model.Extraction{}, fmt.Errorf("model json: %w", err)
+		return nil, nil, fmt.Errorf("model json: %w", err)
 	}
-	ex := model.Extraction{
-		Ticker: ticker,
-		Period: model.Period{FiscalYear: parsed.FiscalYear, FiscalQuarter: parsed.FiscalQuarter},
+	type one struct {
+		year, quarter int
+		facts         []parsedFact
 	}
-	for _, f := range parsed.Facts {
-		item := normalizeItem(f.LineItem)
-		if item == "" {
-			continue
+	groups := make([]one, 0, len(parsed.Periods))
+	if len(parsed.Periods) == 0 && (parsed.FiscalYear != 0 || len(parsed.Facts) > 0) {
+		groups = append(groups, one{parsed.FiscalYear, parsed.FiscalQuarter, parsed.Facts})
+	}
+	for _, p := range parsed.Periods {
+		groups = append(groups, one{p.FiscalYear, p.FiscalQuarter, p.Facts})
+	}
+	var out []model.Extraction
+	for _, g := range groups {
+		ex := model.Extraction{Ticker: ticker, Period: model.Period{FiscalYear: g.year, FiscalQuarter: g.quarter}}
+		for _, f := range g.facts {
+			item := normalizeItem(f.LineItem)
+			if item == "" {
+				continue
+			}
+			unit := f.Unit
+			if unit == "" {
+				unit = model.UnitBillionUSD
+			}
+			fact := model.Fact{LineItem: item, Unit: unit, Statement: statementOf(item), Text: f.Text}
+			if f.Value != nil {
+				n := scale(item, *f.Value, unit)
+				fact.Value = &n
+				fact.Unit = storedUnit(item, unit)
+			}
+			ex.Facts = append(ex.Facts, fact)
 		}
-		unit := f.Unit
-		if unit == "" {
-			unit = model.UnitBillionUSD
+		if ex.Period.Valid() && len(ex.Facts) > 0 {
+			fixGrossMargin(&ex)
+			out = append(out, ex)
 		}
-		fact := model.Fact{LineItem: item, Unit: unit, Statement: statementOf(item), Text: f.Text}
-		if f.Value != nil {
-			n := scale(item, *f.Value, unit)
-			fact.Value = &n
-			fact.Unit = storedUnit(item, unit)
+	}
+	if len(out) == 0 {
+		return nil, nil, fmt.Errorf("model extraction missing period or facts")
+	}
+	analysis := parsed.Analysis
+	if len(analysis) == 0 {
+		analysis = parsed.Takeaway
+	}
+	return out, analysis, nil
+}
+
+// fixGrossMargin corrects the common mix-up of gross profit dollars with the margin ratio.
+// 54.82 billion of gross profit was being stored as 54.82% .
+func fixGrossMargin(ex *model.Extraction) {
+	gm, okGM := ex.Number("gross_margin")
+	rev, okRev := ex.Number("total_revenue")
+	if !okGM || !okRev || rev <= 0 || gm <= 0.52 {
+		return
+	}
+	ratio := (gm * 100) / rev
+	if ratio <= 0.3 || ratio >= 0.52 {
+		return
+	}
+	for i := range ex.Facts {
+		if ex.Facts[i].LineItem == "gross_margin" && ex.Facts[i].Value != nil {
+			ex.Facts[i].Value = &ratio
+			ex.Facts[i].Unit = model.UnitRatio
 		}
-		ex.Facts = append(ex.Facts, fact)
 	}
-	if !ex.Period.Valid() || len(ex.Facts) == 0 {
-		return model.Extraction{}, fmt.Errorf("model extraction missing period or facts")
-	}
-	return ex, nil
+}
+
+type parsedFact struct {
+	LineItem string   `json:"line_item"`
+	Value    *float64 `json:"value"`
+	Text     string   `json:"text"`
+	Unit     string   `json:"unit"`
 }
 
 func fallbackTakeaway(ex model.Extraction, warnings []string) []string {

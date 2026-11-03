@@ -30,7 +30,7 @@ type Message struct {
 func (m Message) Text() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s\n", m.Ticker, m.Period)
-	b.WriteString("需要关注\n")
+	b.WriteString("解读\n")
 	if len(m.Takeaway) == 0 {
 		b.WriteString("- 这期没有抽出可比较的重点\n")
 	}
