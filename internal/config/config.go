@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -38,6 +39,7 @@ type File struct {
 
 // Registry looks companies up by ticker.
 type Registry struct {
+	path     string
 	byTicker map[string]Company
 	list     []Company
 }
@@ -51,7 +53,7 @@ func Load(path string) (*Registry, error) {
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
-	r := &Registry{byTicker: map[string]Company{}}
+	r := &Registry{path: path, byTicker: map[string]Company{}}
 	seen := map[string]struct{}{}
 	for _, c := range f.Companies {
 		c.Ticker = strings.ToUpper(strings.TrimSpace(c.Ticker))
@@ -85,30 +87,121 @@ func (r *Registry) List() []Company {
 	return out
 }
 
+// SetSpreadsheet remembers a workbook created for this ticker and writes it back to the registry file.
+func (r *Registry) SetSpreadsheet(ticker, id string) error {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	c, ok := r.byTicker[ticker]
+	if !ok {
+		return fmt.Errorf("unknown ticker %s", ticker)
+	}
+	c.SpreadsheetID = id
+	r.byTicker[ticker] = c
+	for i := range r.list {
+		if r.list[i].Ticker == ticker {
+			r.list[i].SpreadsheetID = id
+		}
+	}
+	if r.path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(r.path)
+	if err != nil {
+		return err
+	}
+	updated, err := replaceSpreadsheetID(string(b), ticker, id)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(r.path, []byte(updated), 0o644)
+}
+
+func replaceSpreadsheetID(src, ticker, id string) (string, error) {
+	lines := strings.Split(src, "\n")
+	in := false
+	tickerLine := -1
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "- ticker:") {
+			in = strings.TrimSpace(strings.TrimPrefix(trim, "- ticker:")) == ticker
+			if in {
+				tickerLine = i
+			}
+			continue
+		}
+		if in && strings.HasPrefix(trim, "spreadsheet_id:") {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+			lines[i] = indent + "spreadsheet_id: " + id
+			return strings.Join(lines, "\n"), nil
+		}
+		if in && strings.HasPrefix(trim, "- ticker:") {
+			break
+		}
+	}
+	if tickerLine < 0 {
+		return "", fmt.Errorf("ticker %s was not found in registry", ticker)
+	}
+	insert := "    spreadsheet_id: " + id
+	out := append([]string{}, lines[:tickerLine+1]...)
+	out = append(out, insert)
+	out = append(out, lines[tickerLine+1:]...)
+	return strings.Join(out, "\n"), nil
+}
+
 // Settings comes from the environment so secrets stay out of the repo.
 type Settings struct {
-	CompaniesFile string
-	JobStorePath  string
-	ModelAPIKey   string
-	ModelBaseURL  string
-	ModelName     string
-	FeishuWebhook string
-	GoogleCreds   string
-	OTLPEndpoint  string
-	SECUserAgent  string
+	CompaniesFile   string
+	JobStorePath    string
+	ModelAPIKey     string
+	ModelBaseURL    string
+	ModelName       string
+	FeishuWebhook   string
+	FeishuSecret    string
+	GoogleCreds     string
+	GoogleShareWith string
+	OTLPEndpoint    string
+	SECUserAgent    string
 }
 
 func LoadSettings() Settings {
+	LoadDotEnv(".env")
 	return Settings{
-		CompaniesFile: env("COMPANIES_FILE", "configs/companies.yaml"),
-		JobStorePath:  env("JOB_STORE_PATH", "data/jobs.json"),
-		ModelAPIKey:   os.Getenv("DEEPSEEK_API_KEY"),
-		ModelBaseURL:  env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-		ModelName:     env("DEEPSEEK_MODEL", "deepseek-chat"),
-		FeishuWebhook: os.Getenv("FEISHU_WEBHOOK_URL"),
-		GoogleCreds:   os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		OTLPEndpoint:  os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		SECUserAgent:  env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+		CompaniesFile:   env("COMPANIES_FILE", "configs/companies.yaml"),
+		JobStorePath:    env("JOB_STORE_PATH", "data/jobs.json"),
+		ModelAPIKey:     os.Getenv("DEEPSEEK_API_KEY"),
+		ModelBaseURL:    env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		ModelName:       env("DEEPSEEK_MODEL", "deepseek-flash"),
+		FeishuWebhook:   os.Getenv("FEISHU_WEBHOOK_URL"),
+		FeishuSecret:    os.Getenv("FEISHU_WEBHOOK_SECRET"),
+		GoogleCreds:     os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		GoogleShareWith: os.Getenv("GOOGLE_SHARE_WITH"),
+		OTLPEndpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		SECUserAgent:    env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+	}
+}
+
+// LoadDotEnv reads KEY=VALUE lines. Existing environment variables win.
+func LoadDotEnv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		_ = os.Setenv(key, val)
 	}
 }
 

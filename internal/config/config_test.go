@@ -38,6 +38,21 @@ companies:
 	if len(reg.List()) != 2 {
 		t.Fatalf("list %d", len(reg.List()))
 	}
+	if err := reg.SetSpreadsheet("SPACEX", "sheet-1"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sx, ok := again.Get("SPACEX")
+	if !ok || sx.SpreadsheetID != "sheet-1" {
+		t.Fatalf("saved %+v", sx)
+	}
+	apple, _ := again.Get("AAPL")
+	if apple.SpreadsheetID != "abc" {
+		t.Fatalf("apple id changed to %s", apple.SpreadsheetID)
+	}
 }
 
 func TestRejectBadMonth(t *testing.T) {
