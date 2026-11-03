@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
@@ -66,7 +67,24 @@ func Run() error {
 	api := httpapi.API{Pipe: pipe, Obs: obs}
 	thttp.RegisterNoProtocolServiceMux(s.Service("trpc.earnings.sync.HTTP"), api.Handler())
 	obs.Logger.Info("earnings-sync listening", "http", ":8090", "admin", ":8091")
+	go syncOnStart(pipe, obs)
 	return s.Serve()
+}
+
+// syncOnStart lets the process itself pull filings. Companies without a spreadsheet are skipped so a missing sheet does not spend a model call.
+func syncOnStart(pipe *pipeline.Pipeline, obs *observe.Obs) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	for _, company := range pipe.Companies.List() {
+		if company.SpreadsheetID == "" {
+			obs.Logger.Info("startup sync skipped, no spreadsheet", "ticker", company.Ticker)
+			continue
+		}
+		obs.Logger.Info("startup sync", "ticker", company.Ticker)
+		if _, err := pipe.Watch(ctx, company.Ticker, false); err != nil {
+			obs.Logger.Error("startup sync failed", "ticker", company.Ticker, "err", err.Error())
+		}
+	}
 }
 
 // Build wires config, storage, the model, Sheets, and Feishu.
