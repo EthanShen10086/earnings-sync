@@ -2,6 +2,16 @@ package notify
 
 import "testing"
 
+func TestSignStable(t *testing.T) {
+	got := Sign("1599360473", "secret")
+	if got == "" || Sign("1599360473", "secret") != got {
+		t.Fatal(got)
+	}
+	if Sign("1599360473", "other") == got {
+		t.Fatal("signature ignored the secret")
+	}
+}
+
 func TestMessageStartsWithTakeaway(t *testing.T) {
 	text := Message{
 		Ticker:   "AAPL",

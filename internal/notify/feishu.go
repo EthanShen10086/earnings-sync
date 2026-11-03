@@ -3,9 +3,14 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,10 +65,18 @@ type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// Feishu posts to a custom bot webhook.
+// Feishu posts to a custom bot webhook. Secret is the optional signing secret.
 type Feishu struct {
 	Webhook string
+	Secret  string
 	Client  *http.Client
+}
+
+// Sign matches Feishu's custom-bot signature: HMAC-SHA256 of an empty string,
+// keyed by "<unix>\n<secret>".
+func Sign(stamp, secret string) string {
+	mac := hmac.New(sha256.New, []byte(stamp+"\n"+secret))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func (f Feishu) Send(ctx context.Context, msg Message) error {
@@ -74,10 +87,16 @@ func (f Feishu) Send(ctx context.Context, msg Message) error {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
-	payload, _ := json.Marshal(map[string]any{
+	body := map[string]any{
 		"msg_type": "text",
 		"content":  map[string]string{"text": msg.Text()},
-	})
+	}
+	if f.Secret != "" {
+		stamp := strconv.FormatInt(time.Now().Unix(), 10)
+		body["timestamp"] = stamp
+		body["sign"] = Sign(stamp, f.Secret)
+	}
+	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.Webhook, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -88,8 +107,36 @@ func (f Feishu) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 	defer res.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 	if res.StatusCode >= 300 {
-		return fmt.Errorf("feishu: %s", res.Status)
+		return fmt.Errorf("飞书 HTTP %s：%s", res.Status, trim(raw))
+	}
+	var parsed struct {
+		Code          int    `json:"code"`
+		StatusCode    int    `json:"StatusCode"`
+		Msg           string `json:"msg"`
+		StatusMessage string `json:"StatusMessage"`
+	}
+	if json.Unmarshal(raw, &parsed) == nil {
+		code := parsed.Code
+		if code == 0 {
+			code = parsed.StatusCode
+		}
+		msg := parsed.Msg
+		if msg == "" {
+			msg = parsed.StatusMessage
+		}
+		if code != 0 {
+			return fmt.Errorf("飞书拒绝了消息：%s（code %d）。检查 FEISHU_WEBHOOK_URL 和 FEISHU_WEBHOOK_SECRET 是否来自同一个机器人", msg, code)
+		}
 	}
 	return nil
+}
+
+func trim(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 180 {
+		return s[:180]
+	}
+	return s
 }
