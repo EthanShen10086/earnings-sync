@@ -22,42 +22,79 @@ func NewGoogle(ctx context.Context, credFile string) (*Google, error) {
 	if credFile == "" {
 		return nil, fmt.Errorf("GOOGLE_APPLICATION_CREDENTIALS is empty")
 	}
-	svc, err := sheets.NewService(ctx, option.WithCredentialsFile(credFile))
+	svc, err := sheets.NewService(ctx, option.WithCredentialsFile(credFile), option.WithScopes(
+		sheets.SpreadsheetsScope,
+		"https://www.googleapis.com/auth/drive.file",
+	))
 	if err != nil {
 		return nil, err
 	}
 	return &Google{svc: svc}, nil
 }
 
-func (g *Google) Upsert(ctx context.Context, spreadsheetID string, ex model.Extraction) (int, error) {
+func (g *Google) Ping(ctx context.Context, spreadsheetID string) error {
 	if spreadsheetID == "" {
-		return 0, fmt.Errorf("spreadsheet id is empty")
+		return fmt.Errorf("spreadsheet id 为空")
 	}
-	if !ex.Period.Valid() {
-		return 0, fmt.Errorf("period is invalid")
+	_, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, "利润表!A1").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("读不到利润表表头：%w。把表格共享给服务账号 JSON 里的 client_email，权限选编辑者", err)
 	}
-	row, err := g.ensureRow(ctx, spreadsheetID, ex.Period)
+	return nil
+}
+
+func (g *Google) Upsert(ctx context.Context, spreadsheetID string, ex model.Extraction) (int, error) {
+	return g.UpsertAll(ctx, spreadsheetID, []model.Extraction{ex})
+}
+
+// UpsertAll writes every quarter in one read and one BatchUpdate.
+func (g *Google) UpsertAll(ctx context.Context, spreadsheetID string, periods []model.Extraction) (int, error) {
+	if spreadsheetID == "" {
+		return 0, fmt.Errorf("这家公司还没有 spreadsheet_id。复制 Apple 那份表格模板，把新 id 写进 configs/companies.yaml")
+	}
+	resp, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, "利润表!A2:B80").
+		ValueRenderOption("UNFORMATTED_VALUE").Context(ctx).Do()
 	if err != nil {
 		return 0, err
 	}
 	var data []*sheets.ValueRange
-	for _, f := range ex.Facts {
-		ref, ok := inputColumns[f.LineItem]
-		if !ok {
-			continue
+	cells := 0
+	for _, ex := range periods {
+		if !ex.Period.Valid() {
+			return 0, fmt.Errorf("period is invalid")
 		}
-		var v any
-		if f.Value != nil {
-			v = *f.Value
-		} else if f.Text != "" {
-			v = f.Text
-		} else {
-			continue
+		row, fresh := placeRow(resp, ex.Period)
+		if row == 0 {
+			return 0, fmt.Errorf("period grid is full; extend the template past row %d", lastDataRow)
 		}
-		data = append(data, &sheets.ValueRange{
-			Range:  fmt.Sprintf("%s!%s%d", ref.Sheet, ref.Col, row),
-			Values: [][]any{{v}},
-		})
+		if fresh {
+			keys := [][]any{{ex.Period.FiscalYear, ex.Period.FiscalQuarter}}
+			for _, name := range []string{"利润表", "资产负债表", "现金流量表"} {
+				data = append(data, &sheets.ValueRange{
+					Range:  fmt.Sprintf("%s!A%d:B%d", name, row, row),
+					Values: keys,
+				})
+			}
+		}
+		for _, f := range ex.Facts {
+			ref, ok := inputColumns[f.LineItem]
+			if !ok {
+				continue
+			}
+			var v any
+			if f.Value != nil {
+				v = *f.Value
+			} else if f.Text != "" {
+				v = f.Text
+			} else {
+				continue
+			}
+			data = append(data, &sheets.ValueRange{
+				Range:  fmt.Sprintf("%s!%s%d", ref.Sheet, ref.Col, row),
+				Values: [][]any{{v}},
+			})
+			cells++
+		}
 	}
 	if len(data) == 0 {
 		return 0, nil
@@ -69,14 +106,30 @@ func (g *Google) Upsert(ctx context.Context, spreadsheetID string, ex model.Extr
 	if err != nil {
 		return 0, err
 	}
-	return len(data), nil
+	return cells, nil
 }
 
-func (g *Google) ensureRow(ctx context.Context, spreadsheetID string, period model.Period) (int, error) {
-	resp, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, "利润表!A2:B80").
+// Values reads one A1 range. It is used to confirm a batch write landed.
+func (g *Google) Values(ctx context.Context, spreadsheetID, a1 string) ([][]any, error) {
+	resp, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, a1).
 		ValueRenderOption("UNFORMATTED_VALUE").Context(ctx).Do()
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	return resp.Values, nil
+}
+
+// AsInt reads one cell from a Sheets row.
+func AsInt(row []any, i int) (int, bool) {
+	if i >= len(row) {
+		return 0, false
+	}
+	return asInt(row[i])
+}
+
+func placeRow(resp *sheets.ValueRange, period model.Period) (int, bool) {
+	if resp.Values == nil {
+		resp.Values = [][]any{}
 	}
 	empty := 0
 	for i, row := range resp.Values {
@@ -88,46 +141,31 @@ func (g *Google) ensureRow(ctx context.Context, spreadsheetID string, period mod
 			continue
 		}
 		year, yok := asInt(row[0])
-		quarter := 0
-		qok := false
+		quarter, qok := 0, false
 		if len(row) > 1 {
 			quarter, qok = asInt(row[1])
 		}
 		if yok && qok && year == period.FiscalYear && quarter == period.FiscalQuarter {
-			return sheetRow, nil
+			return sheetRow, false
 		}
 	}
-	if empty == 0 {
-		if len(resp.Values) < lastDataRow-1 {
-			empty = firstDataRow + len(resp.Values)
-		}
+	if empty == 0 && len(resp.Values) < lastDataRow-1 {
+		empty = firstDataRow + len(resp.Values)
 	}
 	if empty == 0 {
-		return 0, fmt.Errorf("period grid is full; extend the template past row %d", lastDataRow)
+		return 0, false
 	}
-	_, err = g.svc.Spreadsheets.Values.Update(spreadsheetID, fmt.Sprintf("利润表!A%d:B%d", empty, empty), &sheets.ValueRange{
-		Values: [][]any{{period.FiscalYear, period.FiscalQuarter}},
-	}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
-	if err != nil {
-		return 0, err
+	idx := empty - firstDataRow
+	for len(resp.Values) <= idx {
+		resp.Values = append(resp.Values, []any{})
 	}
-	// Keep the same period key on the other two statements.
-	_, err = g.svc.Spreadsheets.Values.BatchUpdate(spreadsheetID, &sheets.BatchUpdateValuesRequest{
-		ValueInputOption: "USER_ENTERED",
-		Data: []*sheets.ValueRange{
-			{Range: fmt.Sprintf("资产负债表!A%d:B%d", empty, empty), Values: [][]any{{period.FiscalYear, period.FiscalQuarter}}},
-			{Range: fmt.Sprintf("现金流量表!A%d:B%d", empty, empty), Values: [][]any{{period.FiscalYear, period.FiscalQuarter}}},
-		},
-	}).Context(ctx).Do()
-	if err != nil {
-		return 0, err
-	}
-	return empty, nil
+	resp.Values[idx] = []any{float64(period.FiscalYear), float64(period.FiscalQuarter)}
+	return empty, true
 }
 
 func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec) (int, error) {
 	if spreadsheetID == "" {
-		return 0, fmt.Errorf("spreadsheet id is empty")
+		return 0, fmt.Errorf("这家公司还没有 spreadsheet_id。复制 Apple 那份表格模板，把新 id 写进 configs/companies.yaml")
 	}
 	ss, err := g.svc.Spreadsheets.Get(spreadsheetID).
 		Fields("sheets.properties,sheets.charts").Context(ctx).Do()

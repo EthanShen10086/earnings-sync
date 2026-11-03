@@ -17,6 +17,7 @@ type Write struct {
 // Store writes facts and charts. Tests use Memory; production uses Google.
 type Store interface {
 	Upsert(ctx context.Context, spreadsheetID string, ex model.Extraction) (int, error)
+	UpsertAll(ctx context.Context, spreadsheetID string, periods []model.Extraction) (int, error)
 	ApplyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec) (int, error)
 }
 
@@ -51,6 +52,18 @@ func (m *Memory) Upsert(_ context.Context, _ string, ex model.Extraction) (int, 
 		}
 		m.Writes = append(m.Writes, Write{Sheet: ref.Sheet, A1: ref.Col + "5", Value: v})
 		n++
+	}
+	return n, nil
+}
+
+func (m *Memory) UpsertAll(ctx context.Context, spreadsheetID string, periods []model.Extraction) (int, error) {
+	n := 0
+	for _, ex := range periods {
+		wrote, err := m.Upsert(ctx, spreadsheetID, ex)
+		n += wrote
+		if err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
