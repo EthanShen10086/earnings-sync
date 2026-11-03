@@ -1,56 +1,53 @@
 # 财报同步
 
-tRPC-Go 服务。财报从链接、文件或 SEC 进来，抽成利润表、资产负债表、现金流量表，写入对应公司的 Google Sheet，并给飞书发一条先讲重点的消息。
+tRPC-Go 服务。财报进来后，DeepSeek 把数字写入 Google Sheet 的黄色录入格，并给飞书发一条先讲重点的消息。
 
-公司、模型和通知都可以换。Apple、Alphabet、Tesla 已写在 `configs/companies.yaml`。SpaceX 没有公开 10-Q，只能手动投喂。
+## 先看这份指引
 
-## 跑起来
+接通飞书、DeepSeek、已有表格，以及新建表格时要启用的 Google Drive API 和 `GOOGLE_SHARE_WITH`，都按 [docs/connect.md](docs/connect.md) 做。
+
+在项目根目录反复运行：
 
 ```bash
-cp .env.example .env
-# 填 DEEPSEEK_API_KEY、FEISHU_WEBHOOK_URL、GOOGLE_APPLICATION_CREDENTIALS
+go run ./cmd/doctor
+```
 
-go test ./...
+没通过的那一项会写出要打开的网页，以及 `.env` 里要改的那一行。不要把填好的内容发到对话里。四项都显示「通过」后再导入。
+
+## 导入一次
+
+```bash
 go run ./cmd/server -conf trpc_go.yaml
+curl -F ticker=AAPL -F file=@testdata/aapl_2026q4.csv http://127.0.0.1:8090/v1/ingest
 ```
 
-HTTP 在 `:8090`。tRPC admin（含 pprof）在 `127.0.0.1:8091`，例如 `/debug/pprof/`。
+不要加 `dry_run`。成功时：
 
-只抽取、不写表、不发飞书：
+- 2026Q4 那一行的黄色格子被写上数，灰色公式列自己重算，旁边的图跟着变。
+- 飞书群收到要点、勾稽差额和表格链接。
+- `data/jobs.json` 里能看到每一段耗时。同一份文件再传一次不会重复写，也不会重复发。
+- 结构化 CSV 里的多个财季会合成一次表格批量写入，不把这些数字再送给模型逐格抄写。说明在 [docs/connect.md](docs/connect.md)。
+
+只想先看抽取结果、不碰表格和飞书时，才加 `-F dry_run=true`。
+
+新建一张三张报表：
 
 ```bash
-curl -s -F ticker=AAPL -F dry_run=true -F file=@testdata/aapl_2026q4.csv \
-  http://127.0.0.1:8090/v1/ingest
+go run ./cmd/sheetcreate -title "公司名 财务报表"
 ```
 
-正式写入：
+这一步要先做完 `docs/connect.md` 第 4 节。终端打印链接后，把其中的 spreadsheet id 写进 `configs/companies.yaml`。
+
+## 其他入口
 
 ```bash
-curl -s -F ticker=AAPL -F file=@report.pdf http://127.0.0.1:8090/v1/ingest
-curl -s -H 'content-type: application/json' -d '{"ticker":"AAPL","url":"https://example.com/q4.html"}' \
-  http://127.0.0.1:8090/v1/ingest
-curl -s -H 'content-type: application/json' -d '{"ticker":"AAPL"}' http://127.0.0.1:8090/v1/watch
-curl -s http://127.0.0.1:8090/v1/jobs/<job_id>
-curl -s -H 'content-type: application/json' -d '{"job_id":"<job_id>"}' \
-  http://127.0.0.1:8090/v1/charts/recommend
-curl -s -H 'content-type: application/json' -d '{"job_id":"<job_id>","instruction":"画营收饼图"}' \
-  http://127.0.0.1:8090/v1/charts/apply
+curl -H 'content-type: application/json' -d '{"ticker":"AAPL","url":"https://example.com/q4.html"}' http://127.0.0.1:8090/v1/ingest
+curl -H 'content-type: application/json' -d '{"ticker":"AAPL"}' http://127.0.0.1:8090/v1/watch
+curl -H 'content-type: application/json' -d '{"job_id":"<id>","instruction":"画营收饼图"}' http://127.0.0.1:8090/v1/charts/apply
 ```
 
-同一份文件不会重复写表，也不会重复发飞书。任务记录在 `data/jobs.json`，里面有每一段耗时和错误。
+公司在 `configs/companies.yaml`。Apple 用现有表格。Alphabet、Tesla 走 SEC，要先建表并填 spreadsheet id。SpaceX 没有公开 10-Q，只能手动传文件。Cursor 里让模型操作同一套工具时，启用 `.cursor/mcp.json` 的 `earnings-sync`，说明在 `skills/earnings-agent/SKILL.md`。
 
-## 表格
+HTTP 在 `:8090`。pprof 在 `127.0.0.1:8091/debug/pprof/`。指标在 `/metrics`。要看 trace，先 `cd deploy && docker compose up -d`，再把 `OTEL_EXPORTER_OTLP_ENDPOINT` 设为 `http://localhost:4318`。
 
-沿用一行一个财季的三张表。服务只改黄色录入格，不改公式列。Apple 使用已有表格。新公司先复制那份模板，把 spreadsheet id 填进配置，并把表格共享给服务账号。
-
-`图表口径` 仍在表里。规则会建议柱状图或饼图；模型可以额外提建议，但不会自动画进表，除非调用 `ApplyCharts`。
-
-## 可观测
-
-```bash
-cd deploy && docker compose up -d
-```
-
-设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` 后，trace 进 Jaeger（http://localhost:16686）。`/metrics` 给 Prometheus。日志是 JSON，带 `trace_id`。
-
-换模型时改 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_MODEL`，调用方不用改。
+这次实际卡住的问题记在 [docs/questions-and-ux.md](docs/questions-and-ux.md)。
