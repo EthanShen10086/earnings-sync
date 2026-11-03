@@ -195,3 +195,59 @@ func TestWatchUsesLatestFilingOnce(t *testing.T) {
 		t.Fatalf("spacex %v %+v", err, space)
 	}
 }
+
+type fixedModel struct {
+	body string
+}
+
+func (f fixedModel) Name() string { return "fixed" }
+func (f fixedModel) Complete(context.Context, string, string) (string, extract.TokenUsage, error) {
+	return f.body, extract.TokenUsage{Total: 4}, nil
+}
+
+func TestFilingParseWritesBalanceSheet(t *testing.T) {
+	reg, err := config.Load(filepath.Join("..", "..", "configs", "companies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(t.TempDir(), "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	p := &Pipeline{
+		Companies: reg,
+		Jobs:      store,
+		Sheets:    mem,
+		Obs:       observe.New(),
+		Extractor: extract.Extractor{Model: fixedModel{body: `{"periods":[{"fiscal_year":2026,"fiscal_quarter":4,"facts":[
+			{"line_item":"total_revenue","value":114.48},
+			{"line_item":"net_income","value":30.71},
+			{"line_item":"cash","value":36.31},
+			{"line_item":"receivables","value":43.82},
+			{"line_item":"inventory","value":14.54},
+			{"line_item":"accounts_payable","value":82.25},
+			{"line_item":"long_term_debt","value":68.21},
+			{"line_item":"equity","value":112.09}
+		]}],"analysis":["负债表：现金 36 十亿美元，权益 112 十亿美元"]}`}},
+		SECBaseURL: "http://example.test",
+	}
+	body := []byte(`<html><tr><td>Cash and cash equivalents</td><td>36,305</td></tr></html>`)
+	job, err := p.Ingest(context.Background(), Request{Ticker: "AAPL", Filename: "ex991.htm", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cash, ok := job.Extraction.Number("cash")
+	if !ok || cash < 36 || job.Cells == 0 || len(job.Takeaway) == 0 {
+		t.Fatalf("job %+v", job)
+	}
+	found := false
+	for _, w := range mem.Writes {
+		if w.Sheet == "资产负债表" && w.Value == cash {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("writes %+v", mem.Writes)
+	}
+}

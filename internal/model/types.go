@@ -110,6 +110,7 @@ type Job struct {
 	SheetURL   string      `json:"sheet_url,omitempty"`
 	Notified   bool        `json:"notified"`
 	Cells      int         `json:"cells_written,omitempty"`
+	Tokens     int         `json:"model_tokens,omitempty"`
 	Error      string      `json:"error,omitempty"`
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`

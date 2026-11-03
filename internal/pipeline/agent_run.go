@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EthanShen10086/earnings-sync/internal/acquire"
 	"github.com/EthanShen10086/earnings-sync/internal/agent"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
@@ -18,7 +19,10 @@ import (
 // ingest is an agent loop instead of a fixed extract-then-write script.
 func (p *Pipeline) run(ctx context.Context, company config.Company, doc model.Document, hash string, req Request) (*model.Job, error) {
 	if periods, ok := extract.TryStructuredAll(doc.Text, doc.Filename); ok {
-		return p.runPrepared(ctx, company, doc, hash, req, periods)
+		return p.runPrepared(ctx, company, doc, hash, req, periods, nil)
+	}
+	if p.Extractor.Model != nil {
+		return p.runFromReport(ctx, company, doc, hash, req)
 	}
 	if p.Chatter != nil {
 		return p.runAgent(ctx, company, doc, hash, req)
@@ -86,4 +90,41 @@ func (p *Pipeline) runAgent(ctx context.Context, company config.Company, doc mod
 	p.Obs.JobDuration.WithLabelValues(company.Ticker, j.Status, boolLabel(req.DryRun)).Observe(time.Since(start).Seconds())
 	p.Obs.WithContext(ctx).Info("agent finished", "job_id", j.ID, "actions", strings.Join(j.Actions, ","))
 	return j, nil
+}
+
+func (p *Pipeline) runFromReport(ctx context.Context, company config.Company, doc model.Document, hash string, req Request) (*model.Job, error) {
+	ctx, span := p.Obs.Start(ctx, "pipeline.parse",
+		attribute.String("ticker", company.Ticker),
+		attribute.String("doc_hash", hash),
+	)
+	defer span.End()
+	periods, analysis, usage, err := p.Extractor.ParseReport(ctx, doc, company, req.Hint)
+	if usage.Total > 0 {
+		p.Obs.ModelTokens.Add(float64(usage.Total))
+	}
+	if err != nil {
+		j := p.Jobs.Create(company.Ticker, hash, doc.Locator, doc.Source, req.DryRun)
+		return p.fail(j, err.Error(), span)
+	}
+	latest := &periods[len(periods)-1]
+	if p.SECBaseURL == "" {
+		for _, src := range company.Sources {
+			if src.Type == "sec_edgar" && src.CIK != "" {
+				_ = acquire.SupplementCash(ctx, p.Client, src.CIK, p.SECUserAgent, company.FiscalYearEndMonth, latest)
+				break
+			}
+		}
+	}
+	if miss := extract.MissingCore(*latest); len(miss) > 0 {
+		j := p.Jobs.Create(company.Ticker, hash, doc.Locator, doc.Source, req.DryRun)
+		j.Tokens = usage.Total
+		return p.fail(j, fmt.Sprintf("财报解析缺少资产负债表或利润表字段：%s", strings.Join(miss, ", ")), span)
+	}
+	job, err := p.runPrepared(ctx, company, doc, hash, req, periods, analysis)
+	if job != nil && usage.Total > 0 {
+		job.Tokens = usage.Total
+		_ = p.Jobs.Save(job)
+		p.Obs.Logger.Info("deepseek parsed filing", "ticker", company.Ticker, "model_tokens", usage.Total)
+	}
+	return job, err
 }

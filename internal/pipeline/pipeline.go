@@ -65,6 +65,7 @@ func (p *Pipeline) Ingest(ctx context.Context, req Request) (*model.Job, error) 
 	hash := acquire.Hash(req.Ticker, doc.Body)
 	if !req.Force {
 		if existing, ok := p.reusable(hash, req.DryRun); ok {
+			p.Obs.Logger.Info("filing already stored, model not called", "ticker", req.Ticker, "job_id", existing.ID)
 			return existing, nil
 		}
 	}
@@ -215,7 +216,7 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 	return j, nil
 }
 
-func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc model.Document, hash string, req Request, periods []model.Extraction) (*model.Job, error) {
+func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc model.Document, hash string, req Request, periods []model.Extraction, analysis []string) (*model.Job, error) {
 	start := time.Now()
 	j := p.Jobs.Create(company.Ticker, hash, doc.Locator, doc.Source, req.DryRun)
 	ctx, span := p.Obs.Start(ctx, "pipeline.batch",
@@ -263,6 +264,10 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 	}
 
 	stage := p.stage(ctx, "takeaway", func(ctx context.Context) error {
+		if len(analysis) > 0 {
+			j.Takeaway = analysis
+			return nil
+		}
 		lines, usage, _ := p.Extractor.Takeaway(ctx, latest, j.Warnings)
 		if usage.Total > 0 {
 			p.Obs.ModelTokens.Add(float64(usage.Total))
@@ -313,12 +318,18 @@ func (p *Pipeline) Watch(ctx context.Context, ticker string, dry bool) ([]*model
 			if src.Type != "sec_edgar" {
 				continue
 			}
-			filing, ok, err := acquire.LatestReport(ctx, p.Client, p.SECBaseURL, src.CIK, p.SECUserAgent, company.FiscalYearEndMonth)
+			filing, ok, err := acquire.LatestFinancials(ctx, p.Client, p.SECBaseURL, src.CIK, p.SECUserAgent, company.FiscalYearEndMonth)
 			if err != nil {
 				return out, err
 			}
 			if !ok {
 				continue
+			}
+			if filing.Form == "8-K" {
+				if exhibit, err := acquire.ExhibitURL(ctx, p.Client, src.CIK, filing.Accession, p.SECUserAgent); err == nil && exhibit != "" {
+					filing.URL = exhibit
+				}
+				filing.Period = model.Period{}
 			}
 			if existing, seen := p.Jobs.ByLocator(filing.URL); seen && existing.DryRun == dry {
 				out = append(out, existing)
