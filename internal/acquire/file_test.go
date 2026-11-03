@@ -86,3 +86,33 @@ func TestLatestReport(t *testing.T) {
 		t.Fatalf("filing incomplete %+v", f)
 	}
 }
+
+func TestEarningsReleaseBeatsOlder10Q(t *testing.T) {
+	body := []byte(`{"filings":{"recent":{
+		"accessionNumber":["0000320193-26-000024","0000320193-26-000020"],
+		"form":["8-K","10-Q"],
+		"filingDate":["2026-11-02","2026-07-31"],
+		"reportDate":["2026-11-02","2026-06-27"],
+		"primaryDocument":["cover.htm","q.htm"],
+		"items":["2.02,9.01",""]
+	}}}`)
+	f, ok, err := parseFinancials(body, "320193", 9)
+	if err != nil || !ok || f.Form != "8-K" || f.Period.Valid() {
+		t.Fatalf("%+v %v %v", f, ok, err)
+	}
+	name, err := pickExhibit([]byte(`{"directory":{"item":[
+		{"name":"aapl-20261102.htm","size":"100"},
+		{"name":"a8-kex991q42026.htm","size":"172036"}
+	]}}`))
+	if err != nil || name != "a8-kex991q42026.htm" {
+		t.Fatalf("%s %v", name, err)
+	}
+}
+
+func TestStatementTextKeepsRows(t *testing.T) {
+	html := `<html><body><p>Apple reports fourth quarter results</p><table><tr><td>Cash and cash equivalents</td><td>36,305</td></tr></table></body></html>`
+	text := StatementText(html)
+	if !strings.Contains(text, "Cash and cash equivalents | 36,305") || !strings.Contains(text, "fourth quarter") {
+		t.Fatal(text)
+	}
+}

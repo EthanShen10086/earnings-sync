@@ -58,17 +58,25 @@ func FetchURL(ctx context.Context, client *http.Client, rawURL, userAgent string
 		req.Header.Set("User-Agent", userAgent)
 	}
 	req.Header.Set("Accept", "text/html,application/pdf,text/plain,text/csv,application/json,*/*")
+	req.Header.Set("Accept-Encoding", "identity")
 	res, err := client.Do(req)
 	if err != nil {
 		return model.Document{}, err
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, 20<<20))
-	if err != nil {
-		return model.Document{}, err
-	}
-	if res.StatusCode >= 300 {
+	var body []byte
+	if res.StatusCode == http.StatusForbidden && strings.Contains(rawURL, "sec.gov") {
+		body, err = secGet(ctx, rawURL, userAgent)
+		if err != nil {
+			return model.Document{}, err
+		}
+	} else if res.StatusCode >= 300 {
 		return model.Document{}, fmt.Errorf("GET %s: %s", rawURL, res.Status)
+	} else {
+		body, err = io.ReadAll(io.LimitReader(res.Body, 20<<20))
+		if err != nil {
+			return model.Document{}, err
+		}
 	}
 	name := path.Base(rawURL)
 	doc := model.Document{
@@ -100,7 +108,7 @@ func ToText(doc model.Document) (string, error) {
 		strings.HasSuffix(strings.ToLower(doc.Filename), ".xlsx"):
 		return xlsxText(doc.Body)
 	default:
-		return string(doc.Body), nil
+		return StatementText(string(doc.Body)), nil
 	}
 }
 
