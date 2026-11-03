@@ -70,19 +70,25 @@ var templateCharts = []tmplChart{
 }
 
 type tmplChart struct {
-	Title     string
-	Sheet     string
-	Type      string
-	DomainCol int64
-	SeriesCol int64
-	HeaderRow int64
-	EndRow    int64
-	AnchorRow int64
-	AnchorCol int64
+	Title      string
+	Sheet      string
+	Type       string
+	DomainCol  int64
+	SeriesCol  int64
+	HeaderRow  int64
+	EndRow     int64
+	AnchorRow  int64
+	AnchorCol  int64
+	SeriesCols []int64
 }
 
 func templateByTitle(title string) (tmplChart, bool) {
 	for _, c := range templateCharts {
+		if c.Title == title {
+			return c, true
+		}
+	}
+	for _, c := range analysisCharts {
 		if c.Title == title {
 			return c, true
 		}

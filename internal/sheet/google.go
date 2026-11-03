@@ -185,12 +185,24 @@ func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []
 		}
 	}
 	var reqs []*sheets.Request
+	titles := map[string]tmplChart{}
 	for _, spec := range specs {
 		if spec.Source != "" && spec.Source != model.SourceRule {
 			continue
 		}
 		tmpl, ok := templateByTitle(spec.Title)
-		if !ok || existing[spec.Title] {
+		if ok {
+			titles[spec.Title] = tmpl
+		}
+	}
+	for _, tmpl := range analysisCharts {
+		titles[tmpl.Title] = tmpl
+	}
+	if err := g.writeAnalysis(ctx, spreadsheetID); err != nil {
+		return 0, err
+	}
+	for title, tmpl := range titles {
+		if existing[title] {
 			continue
 		}
 		sid, ok := sheetIDs[tmpl.Sheet]
@@ -209,28 +221,48 @@ func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []
 	return len(reqs), nil
 }
 
+func (g *Google) writeAnalysis(ctx context.Context, spreadsheetID string) error {
+	_, err := g.svc.Spreadsheets.Values.BatchUpdate(spreadsheetID, &sheets.BatchUpdateValuesRequest{
+		ValueInputOption: "USER_ENTERED",
+		Data:             analysisFormulas(),
+	}).Context(ctx).Do()
+	return err
+}
+
 func addChart(sheetID int64, tmpl tmplChart) *sheets.AddChartRequest {
 	domain := grid(sheetID, tmpl.HeaderRow, tmpl.EndRow, tmpl.DomainCol, tmpl.DomainCol+1)
-	series := grid(sheetID, tmpl.HeaderRow, tmpl.EndRow, tmpl.SeriesCol, tmpl.SeriesCol+1)
+	cols := tmpl.SeriesCols
+	if len(cols) == 0 {
+		cols = []int64{tmpl.SeriesCol}
+	}
 	spec := &sheets.ChartSpec{Title: tmpl.Title}
 	if tmpl.Type == model.ChartPie {
+		series := grid(sheetID, tmpl.HeaderRow, tmpl.EndRow, cols[0], cols[0]+1)
 		spec.PieChart = &sheets.PieChartSpec{
 			LegendPosition: "RIGHT_LEGEND",
 			Domain:         &sheets.ChartData{SourceRange: &sheets.ChartSourceRange{Sources: []*sheets.GridRange{domain}}},
 			Series:         &sheets.ChartData{SourceRange: &sheets.ChartSourceRange{Sources: []*sheets.GridRange{series}}},
 		}
 	} else {
+		legend := "NO_LEGEND"
+		if len(cols) > 1 {
+			legend = "BOTTOM_LEGEND"
+		}
+		var series []*sheets.BasicChartSeries
+		for _, col := range cols {
+			series = append(series, &sheets.BasicChartSeries{
+				Series:     &sheets.ChartData{SourceRange: &sheets.ChartSourceRange{Sources: []*sheets.GridRange{grid(sheetID, tmpl.HeaderRow, tmpl.EndRow, col, col+1)}}},
+				TargetAxis: "LEFT_AXIS",
+			})
+		}
 		spec.BasicChart = &sheets.BasicChartSpec{
 			ChartType:      "COLUMN",
 			HeaderCount:    1,
-			LegendPosition: "NO_LEGEND",
+			LegendPosition: legend,
 			Domains: []*sheets.BasicChartDomain{{
 				Domain: &sheets.ChartData{SourceRange: &sheets.ChartSourceRange{Sources: []*sheets.GridRange{domain}}},
 			}},
-			Series: []*sheets.BasicChartSeries{{
-				Series:     &sheets.ChartData{SourceRange: &sheets.ChartSourceRange{Sources: []*sheets.GridRange{series}}},
-				TargetAxis: "LEFT_AXIS",
-			}},
+			Series: series,
 		}
 	}
 	return &sheets.AddChartRequest{Chart: &sheets.EmbeddedChart{

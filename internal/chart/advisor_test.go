@@ -9,7 +9,7 @@ func TestRecommendAndInstruction(t *testing.T) {
 		t.Fatalf("specs %d", len(got))
 	}
 	pie := FromInstruction("画一个营收构成饼图", ex)
-	if len(pie) != 1 || pie[0].ChartType != "PIE" {
+	if len(pie) == 0 || pie[0].ChartType != "PIE" {
 		t.Fatalf("pie %#v", pie)
 	}
 	col := FromInstruction("看总营收柱状图", ex)

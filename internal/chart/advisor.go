@@ -36,6 +36,54 @@ func Recommend(ex model.Extraction) []model.ChartSpec {
 			Source: model.SourceRule, Sheet: "利润表",
 		})
 	}
+	if hasAny(ex, "iphone_revenue", "services_revenue") {
+		out = append(out, model.ChartSpec{
+			Title: "硬件还是服务：本季收入从哪来", ChartType: model.ChartPie, Reason: "硬件卖设备，服务把利润做厚。饼图看这一季收入从哪来",
+			Source: model.SourceRule, Sheet: "利润表",
+		})
+	}
+	if hasAny(ex, "total_revenue", "net_income") {
+		out = append(out, model.ChartSpec{
+			Title: "收入能留下多少利润", ChartType: model.ChartColumn, Reason: "营收和净利润放在一起，看这一季收入能留下多少",
+			Source: model.SourceRule, Sheet: "利润表",
+		})
+	}
+	if hasAny(ex, "services_revenue", "total_revenue") {
+		out = append(out, model.ChartSpec{
+			Title: "服务占收入的比例", ChartType: model.ChartColumn, Reason: "服务占比按财季排开，看商业模式有没有往高毛利移动",
+			Source: model.SourceRule, Sheet: "利润表",
+		})
+	}
+	if hasAny(ex, "cash", "long_term_debt", "equity") {
+		out = append(out,
+			model.ChartSpec{
+				Title: "家底和债务谁更大", ChartType: model.ChartColumn, Reason: "现金证券、有息债务和股东权益放在一起，看家底盖不盖得住债",
+				Source: model.SourceRule, Sheet: "资产负债表",
+			},
+			model.ChartSpec{
+				Title: "净现金盖不盖得住债", ChartType: model.ChartColumn, Reason: "净现金和有息债务按财季排开，看健康度是变厚还是变薄",
+				Source: model.SourceRule, Sheet: "资产负债表",
+			},
+		)
+	}
+	if hasAny(ex, "inventory", "receivables") {
+		out = append(out, model.ChartSpec{
+			Title: "存货和应收有没有胀", ChartType: model.ChartColumn, Reason: "存货和应收账款突然变大，是这季资产负债表上要盯的点",
+			Source: model.SourceRule, Sheet: "资产负债表",
+		})
+	}
+	if hasAny(ex, "operating_cash_flow", "free_cash_flow", "capital_return") {
+		out = append(out,
+			model.ChartSpec{
+				Title: "这一季现金怎么来、怎么走", ChartType: model.ChartColumn, Reason: "经营现金流、资本开支、自由现金流和资本返还放在一起，看现金的来路和去向",
+				Source: model.SourceRule, Sheet: "现金流量表",
+			},
+			model.ChartSpec{
+				Title: "赚到的现金有没有还给股东", ChartType: model.ChartColumn, Reason: "经营现金流和资本返还按财季对比，看赚到的现金有没有分出去",
+				Source: model.SourceRule, Sheet: "现金流量表",
+			},
+		)
+	}
 	return out
 }
 
