@@ -1,0 +1,28 @@
+companies:
+  - ticker: AAPL
+    name: Apple
+    fiscal_year_end_month: 9
+    spreadsheet_id: 1ePLqJ8emZAZ-cYp90w5TvA8ptAxjLFr2CcrL9zQWEE0
+    sources:
+      - type: sec_edgar
+        cik: "0000320193"
+  - ticker: GOOGL
+    name: Alphabet
+    fiscal_year_end_month: 12
+    spreadsheet_id: ""
+    sources:
+      - type: sec_edgar
+        cik: "0001652044"
+  - ticker: TSLA
+    name: Tesla
+    fiscal_year_end_month: 12
+    spreadsheet_id: ""
+    sources:
+      - type: sec_edgar
+        cik: "0001318605"
+  - ticker: SPACEX
+    name: SpaceX
+    fiscal_year_end_month: 12
+    spreadsheet_id: ""
+    sources:
+      - type: manual

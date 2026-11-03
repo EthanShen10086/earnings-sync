@@ -1,0 +1,120 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Source is one place a company publishes filings.
+type Source struct {
+	Type string `yaml:"type"`
+	CIK  string `yaml:"cik"`
+	URL  string `yaml:"url"`
+}
+
+// Company is a tracked issuer. SpreadsheetID may be empty until a template is copied.
+type Company struct {
+	Ticker             string   `yaml:"ticker"`
+	Name               string   `yaml:"name"`
+	FiscalYearEndMonth int      `yaml:"fiscal_year_end_month"`
+	SpreadsheetID      string   `yaml:"spreadsheet_id"`
+	Sources            []Source `yaml:"sources"`
+}
+
+func (c Company) SheetURL() string {
+	if c.SpreadsheetID == "" {
+		return ""
+	}
+	return "https://docs.google.com/spreadsheets/d/" + c.SpreadsheetID
+}
+
+// File is the on-disk company registry.
+type File struct {
+	Companies []Company `yaml:"companies"`
+}
+
+// Registry looks companies up by ticker.
+type Registry struct {
+	byTicker map[string]Company
+	list     []Company
+}
+
+func Load(path string) (*Registry, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f File
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		return nil, err
+	}
+	r := &Registry{byTicker: map[string]Company{}}
+	seen := map[string]struct{}{}
+	for _, c := range f.Companies {
+		c.Ticker = strings.ToUpper(strings.TrimSpace(c.Ticker))
+		if c.Ticker == "" {
+			return nil, fmt.Errorf("company is missing ticker")
+		}
+		if _, ok := seen[c.Ticker]; ok {
+			return nil, fmt.Errorf("duplicate ticker %s", c.Ticker)
+		}
+		if c.FiscalYearEndMonth < 1 || c.FiscalYearEndMonth > 12 {
+			return nil, fmt.Errorf("%s fiscal_year_end_month must be 1-12", c.Ticker)
+		}
+		seen[c.Ticker] = struct{}{}
+		r.byTicker[c.Ticker] = c
+		r.list = append(r.list, c)
+	}
+	if len(r.list) == 0 {
+		return nil, fmt.Errorf("no companies configured")
+	}
+	return r, nil
+}
+
+func (r *Registry) Get(ticker string) (Company, bool) {
+	c, ok := r.byTicker[strings.ToUpper(ticker)]
+	return c, ok
+}
+
+func (r *Registry) List() []Company {
+	out := make([]Company, len(r.list))
+	copy(out, r.list)
+	return out
+}
+
+// Settings comes from the environment so secrets stay out of the repo.
+type Settings struct {
+	CompaniesFile string
+	JobStorePath  string
+	ModelAPIKey   string
+	ModelBaseURL  string
+	ModelName     string
+	FeishuWebhook string
+	GoogleCreds   string
+	OTLPEndpoint  string
+	SECUserAgent  string
+}
+
+func LoadSettings() Settings {
+	return Settings{
+		CompaniesFile: env("COMPANIES_FILE", "configs/companies.yaml"),
+		JobStorePath:  env("JOB_STORE_PATH", "data/jobs.json"),
+		ModelAPIKey:   os.Getenv("DEEPSEEK_API_KEY"),
+		ModelBaseURL:  env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		ModelName:     env("DEEPSEEK_MODEL", "deepseek-chat"),
+		FeishuWebhook: os.Getenv("FEISHU_WEBHOOK_URL"),
+		GoogleCreds:   os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		OTLPEndpoint:  os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		SECUserAgent:  env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+	}
+}
+
+func env(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}

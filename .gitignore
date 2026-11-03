@@ -1,0 +1,6 @@
+.env
+data/
+bin/
+*.db
+*.exe
+coverage.out

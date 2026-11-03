@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package trpc.earnings.sync;
+
+option go_package = "github.com/EthanShen10086/earnings-sync/proto/earnings";
+
+// HTTP 入口与这些 RPC 一一对应。当前进程用 tRPC-Go 的 HTTP 服务承载 JSON，
+// 以后可用 trpc create 生成桩，字段名保持不变。
+
+service IngestService {
+  rpc Ingest(IngestRequest) returns (JobResponse);
+  rpc Watch(WatchRequest) returns (WatchResponse);
+}
+
+service ChartService {
+  rpc RecommendCharts(ChartRequest) returns (ChartResponse);
+  rpc ApplyCharts(ApplyChartRequest) returns (ChartResponse);
+}
+
+service JobService {
+  rpc GetJob(GetJobRequest) returns (JobResponse);
+}
+
+message IngestRequest {
+  string ticker = 1;
+  string url = 2;
+  string filename = 3;
+  bytes body = 4;
+  bool dry_run = 5;
+  bool force = 6;
+}
+
+message WatchRequest {
+  string ticker = 1;
+  bool dry_run = 2;
+}
+
+message WatchResponse {
+  repeated Job jobs = 1;
+}
+
+message ChartRequest {
+  string job_id = 1;
+}
+
+message ApplyChartRequest {
+  string job_id = 1;
+  string instruction = 2;
+  bool apply_rules = 3;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message JobResponse {
+  Job job = 1;
+}
+
+message ChartResponse {
+  repeated ChartSpec charts = 1;
+}
+
+message Job {
+  string id = 1;
+  string ticker = 2;
+  string status = 3;
+  string doc_hash = 4;
+  bool dry_run = 5;
+  repeated string takeaway = 6;
+  repeated string warnings = 7;
+  repeated ChartSpec charts = 8;
+  string sheet_url = 9;
+  bool notified = 10;
+  string error = 11;
+}
+
+message ChartSpec {
+  string title = 1;
+  string chart_type = 2;
+  string reason = 3;
+  string source = 4;
+}
