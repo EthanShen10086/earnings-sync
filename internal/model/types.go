@@ -102,6 +102,7 @@ type Job struct {
 	Source     string      `json:"source,omitempty"`
 	DryRun     bool        `json:"dry_run"`
 	Stages     []Stage     `json:"stages,omitempty"`
+	Actions    []string    `json:"actions,omitempty"`
 	Extraction *Extraction `json:"extraction,omitempty"`
 	Warnings   []string    `json:"warnings,omitempty"`
 	Takeaway   []string    `json:"takeaway,omitempty"`
