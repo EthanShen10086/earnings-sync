@@ -11,6 +11,7 @@ import (
 	"trpc.group/trpc-go/trpc-go/filter"
 	thttp "trpc.group/trpc-go/trpc-go/http"
 
+	"github.com/EthanShen10086/earnings-sync/internal/agent"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
 	"github.com/EthanShen10086/earnings-sync/internal/httpapi"
@@ -80,13 +81,16 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 	}
 	obs := observe.New()
 	var model extract.Provider
+	var chatter agent.Chatter
 	if settings.ModelAPIKey != "" {
-		model = extract.HTTPProvider{
+		provider := extract.HTTPProvider{
 			NameStr: "deepseek",
 			BaseURL: settings.ModelBaseURL,
 			APIKey:  settings.ModelAPIKey,
 			Model:   settings.ModelName,
 		}
+		model = provider
+		chatter = provider
 	}
 	var sheets sheet.Store
 	if settings.GoogleCreds != "" {
@@ -98,7 +102,7 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 	}
 	var sender notify.Sender
 	if settings.FeishuWebhook != "" {
-		sender = notify.Feishu{Webhook: settings.FeishuWebhook}
+		sender = notify.Feishu{Webhook: settings.FeishuWebhook, Secret: settings.FeishuSecret}
 	}
 	return &pipeline.Pipeline{
 		Companies:    reg,
@@ -106,6 +110,9 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 		Extractor:    extract.Extractor{Model: model},
 		Sheets:       sheets,
 		Notifier:     sender,
+		Chatter:      chatter,
+		CredFile:     settings.GoogleCreds,
+		ShareWith:    settings.GoogleShareWith,
 		Obs:          obs,
 		SECUserAgent: settings.SECUserAgent,
 		Client:       http.DefaultClient,

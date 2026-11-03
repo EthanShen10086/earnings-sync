@@ -119,6 +119,33 @@ func TestLiveWriteAndNotifyOnce(t *testing.T) {
 	}
 }
 
+func TestDryRunDoesNotBlockRealWrite(t *testing.T) {
+	body := []byte("fiscal_year,fiscal_quarter,line_item,value,unit\n2026,4,total_revenue,10,billion_usd\n2026,3,total_revenue,9,billion_usd\n")
+	reg, err := config.Load(filepath.Join("..", "..", "configs", "companies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(t.TempDir(), "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	note := &capture{}
+	p := &Pipeline{Companies: reg, Jobs: store, Sheets: mem, Notifier: note, Obs: observe.New()}
+	req := Request{Ticker: "AAPL", Filename: "two.csv", Body: body, DryRun: true}
+	if _, err := p.Ingest(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	req.DryRun = false
+	job, err := p.Ingest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.DryRun || job.Cells != 2 || note.n != 1 || len(mem.Writes) != 2 {
+		t.Fatalf("job %+v writes %d notes %d", job, len(mem.Writes), note.n)
+	}
+}
+
 func TestWatchUsesLatestFilingOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/submissions/") {

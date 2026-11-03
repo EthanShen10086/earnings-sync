@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/EthanShen10086/earnings-sync/internal/acquire"
+	"github.com/EthanShen10086/earnings-sync/internal/agent"
 	"github.com/EthanShen10086/earnings-sync/internal/chart"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
@@ -41,6 +42,9 @@ type Pipeline struct {
 	Extractor    extract.Extractor
 	Sheets       sheet.Store
 	Notifier     notify.Sender
+	Chatter      agent.Chatter
+	CredFile     string
+	ShareWith    string
 	Obs          *observe.Obs
 	SECUserAgent string
 	SECBaseURL   string
@@ -60,13 +64,13 @@ func (p *Pipeline) Ingest(ctx context.Context, req Request) (*model.Job, error) 
 	}
 	hash := acquire.Hash(req.Ticker, doc.Body)
 	if !req.Force {
-		if existing, ok := p.Jobs.ByHash(hash); ok {
+		if existing, ok := p.reusable(hash, req.DryRun); ok {
 			return existing, nil
 		}
 	}
-	v, err, _ := p.group.Do(hash, func() (any, error) {
+	v, err, _ := p.group.Do(hash+boolLabel(req.DryRun), func() (any, error) {
 		if !req.Force {
-			if existing, ok := p.Jobs.ByHash(hash); ok {
+			if existing, ok := p.reusable(hash, req.DryRun); ok {
 				return existing, nil
 			}
 		}
@@ -97,7 +101,7 @@ func (p *Pipeline) acquire(ctx context.Context, req Request) (model.Document, er
 	return doc, err
 }
 
-func (p *Pipeline) run(ctx context.Context, company config.Company, doc model.Document, hash string, req Request) (*model.Job, error) {
+func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc model.Document, hash string, req Request) (*model.Job, error) {
 	start := time.Now()
 	j := p.Jobs.Create(company.Ticker, hash, doc.Locator, doc.Source, req.DryRun)
 	ctx, span := p.Obs.Start(ctx, "pipeline.run",
@@ -148,7 +152,7 @@ func (p *Pipeline) run(ctx context.Context, company config.Company, doc model.Do
 				return fmt.Errorf("ticker %s has no spreadsheet_id", company.Ticker)
 			}
 			if p.Sheets == nil {
-				return fmt.Errorf("google sheets client is not configured")
+				return fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
 			}
 			begun := time.Now()
 			n, err := p.Sheets.Upsert(ctx, company.SpreadsheetID, *j.Extraction)
@@ -211,6 +215,93 @@ func (p *Pipeline) run(ctx context.Context, company config.Company, doc model.Do
 	return j, nil
 }
 
+func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc model.Document, hash string, req Request, periods []model.Extraction) (*model.Job, error) {
+	start := time.Now()
+	j := p.Jobs.Create(company.Ticker, hash, doc.Locator, doc.Source, req.DryRun)
+	ctx, span := p.Obs.Start(ctx, "pipeline.batch",
+		attribute.String("ticker", company.Ticker),
+		attribute.String("doc_hash", hash),
+		attribute.Int("periods", len(periods)),
+		attribute.Bool("dry_run", req.DryRun),
+	)
+	defer span.End()
+	for i := range periods {
+		periods[i].Ticker = company.Ticker
+		j.Warnings = append(j.Warnings, reconcile.Warnings(periods[i])...)
+	}
+	latest := periods[len(periods)-1]
+	j.Extraction = &latest
+	j.Charts = chart.Recommend(latest)
+	p.Obs.ReconcileDiff.Add(float64(len(j.Warnings)))
+
+	if !req.DryRun {
+		stage := p.stage(ctx, "sheet", func(ctx context.Context) error {
+			if company.SpreadsheetID == "" {
+				return fmt.Errorf("ticker %s has no spreadsheet_id", company.Ticker)
+			}
+			if p.Sheets == nil {
+				return fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
+			}
+			begun := time.Now()
+			n, err := p.Sheets.UpsertAll(ctx, company.SpreadsheetID, periods)
+			p.Obs.SheetLatency.Observe(time.Since(begun).Seconds())
+			if err != nil {
+				return err
+			}
+			j.Cells = n
+			p.Obs.Cells.Add(float64(n))
+			j.SheetURL = company.SheetURL()
+			_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
+			return err
+		})
+		j.Stages = append(j.Stages, stage)
+		if stage.Error != "" {
+			return p.fail(j, stage.Error, span)
+		}
+	} else {
+		j.SheetURL = company.SheetURL()
+	}
+
+	stage := p.stage(ctx, "takeaway", func(ctx context.Context) error {
+		lines, usage, _ := p.Extractor.Takeaway(ctx, latest, j.Warnings)
+		if usage.Total > 0 {
+			p.Obs.ModelTokens.Add(float64(usage.Total))
+		}
+		j.Takeaway = lines
+		return nil
+	})
+	j.Stages = append(j.Stages, stage)
+
+	if !req.DryRun && p.Notifier != nil {
+		stage = p.stage(ctx, "notify", func(ctx context.Context) error {
+			err := p.Notifier.Send(ctx, notify.Message{
+				Ticker:   company.Ticker,
+				Period:   latest.Period.Label(),
+				Takeaway: j.Takeaway,
+				Warnings: j.Warnings,
+				Charts:   j.Charts,
+				SheetURL: j.SheetURL,
+			})
+			if err != nil {
+				p.Obs.NotifyFail.Inc()
+			}
+			return err
+		})
+		j.Stages = append(j.Stages, stage)
+		if stage.Error != "" {
+			return p.fail(j, stage.Error, span)
+		}
+		j.Notified = true
+	}
+
+	j.Status = model.StatusSucceeded
+	if err := p.Jobs.Save(j); err != nil {
+		return nil, err
+	}
+	p.Obs.JobDuration.WithLabelValues(company.Ticker, j.Status, boolLabel(req.DryRun)).Observe(time.Since(start).Seconds())
+	return j, nil
+}
+
 func (p *Pipeline) Watch(ctx context.Context, ticker string, dry bool) ([]*model.Job, error) {
 	ticker = strings.ToUpper(ticker)
 	var out []*model.Job
@@ -229,7 +320,7 @@ func (p *Pipeline) Watch(ctx context.Context, ticker string, dry bool) ([]*model
 			if !ok {
 				continue
 			}
-			if existing, seen := p.Jobs.ByLocator(filing.URL); seen {
+			if existing, seen := p.Jobs.ByLocator(filing.URL); seen && existing.DryRun == dry {
 				out = append(out, existing)
 				continue
 			}
@@ -274,7 +365,7 @@ func (p *Pipeline) Apply(ctx context.Context, jobID, instruction string, rules b
 	}
 	company, _ := p.Companies.Get(j.Ticker)
 	if company.SpreadsheetID == "" || p.Sheets == nil {
-		return specs, fmt.Errorf("google sheets client is not configured")
+		return specs, fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
 	}
 	if _, err := p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs); err != nil {
 		return nil, err
@@ -327,6 +418,14 @@ func ruleCharts(in []model.ChartSpec) []model.ChartSpec {
 		}
 	}
 	return out
+}
+
+func (p *Pipeline) reusable(hash string, dry bool) (*model.Job, bool) {
+	existing, ok := p.Jobs.ByHash(hash)
+	if !ok || existing.DryRun != dry || existing.Status != model.StatusSucceeded {
+		return nil, false
+	}
+	return existing, true
 }
 
 func boolLabel(v bool) string {
