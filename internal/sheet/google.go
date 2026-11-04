@@ -198,9 +198,13 @@ func (g *Google) ApplyCompanyCharts(ctx context.Context, spreadsheetID string, s
 			continue
 		}
 		tmpl, ok := templateByTitle(spec.Title)
-		if ok {
-			titles[spec.Title] = tmpl
+		if !ok {
+			continue
 		}
+		if len(segments) > 0 && (tmpl.Title == "硬件还是服务：本季收入从哪来" || tmpl.Title == "服务占收入的比例") {
+			continue
+		}
+		titles[spec.Title] = tmpl
 	}
 	for _, tmpl := range analysisCharts {
 		if len(segments) > 0 && (tmpl.Title == "硬件还是服务：本季收入从哪来" || tmpl.Title == "服务占收入的比例") {
