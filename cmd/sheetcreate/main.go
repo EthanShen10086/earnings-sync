@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/EthanShen10086/earnings-sync/internal/config"
@@ -12,7 +13,8 @@ import (
 )
 
 func main() {
-	title := flag.String("title", "财务报表", "新表格标题")
+	title := flag.String("title", "", "新表格标题。空着时用公司名")
+	ticker := flag.String("ticker", "", "公司代码。给出后用它的分部做表头，并把 spreadsheet id 写回配置")
 	flag.Parse()
 	settings := config.LoadSettings()
 	if settings.GoogleCreds == "" {
@@ -39,7 +41,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	id, err := g.CreateWorkbook(ctx, settings.GoogleCreds, *title, settings.GoogleShareWith)
+	var segments []config.Segment
+	reg, err := config.Load(settings.CompaniesFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if *ticker != "" {
+		company, ok := reg.Get(*ticker)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "配置里没有 %s。先写进 configs/companies.yaml。\n", *ticker)
+			os.Exit(1)
+		}
+		segments = company.Segments
+		if *title == "" {
+			*title = company.Name + " 财务报表"
+		}
+	}
+	if *title == "" {
+		*title = "财务报表"
+	}
+	id, err := g.CreateWorkbook(ctx, settings.GoogleCreds, *title, settings.GoogleShareWith, segments)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if id != "" {
@@ -47,6 +69,15 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	fmt.Println("已创建。打开后确认你能编辑，再把 spreadsheet id 写进 configs/companies.yaml。")
+	if *ticker != "" {
+		if err := reg.SetSpreadsheet(*ticker, id); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Println("https://docs.google.com/spreadsheets/d/" + id)
+			os.Exit(1)
+		}
+		fmt.Printf("已创建，并写回 %s 的 spreadsheet_id。\n", strings.ToUpper(*ticker))
+	} else {
+		fmt.Println("已创建。打开后确认你能编辑，再把 spreadsheet id 写进 configs/companies.yaml。")
+	}
 	fmt.Println("https://docs.google.com/spreadsheets/d/" + id)
 }

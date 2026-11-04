@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,6 +53,22 @@ companies:
 	apple, _ := again.Get("AAPL")
 	if apple.SpreadsheetID != "abc" {
 		t.Fatalf("apple id changed to %s", apple.SpreadsheetID)
+	}
+}
+
+func TestAllowedLineItemsStayWithTheCompany(t *testing.T) {
+	apple := Company{Ticker: "AAPL"}
+	if !strings.Contains(apple.AllowedLineItems(), "iphone_revenue") {
+		t.Fatal(apple.AllowedLineItems())
+	}
+	other := Company{Ticker: "MSFT"}
+	if strings.Contains(other.AllowedLineItems(), "iphone") {
+		t.Fatal(other.AllowedLineItems())
+	}
+	amazon := Company{Ticker: "AMZN", Segments: []Segment{{Key: "aws_revenue", Column: "F", Header: "AWS净销售额_十亿美元"}}}
+	got := amazon.AllowedLineItems()
+	if !strings.Contains(got, "aws_revenue") || strings.Contains(got, "iphone") {
+		t.Fatal(got)
 	}
 }
 

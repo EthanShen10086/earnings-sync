@@ -16,13 +16,21 @@ type Source struct {
 	URL  string `yaml:"url"`
 }
 
+// Segment is one revenue line that differs by company. Apple uses iPhone; Amazon uses AWS.
+type Segment struct {
+	Key    string `yaml:"key"`
+	Column string `yaml:"column"`
+	Header string `yaml:"header"`
+}
+
 // Company is a tracked issuer. SpreadsheetID may be empty until a template is copied.
 type Company struct {
-	Ticker             string   `yaml:"ticker"`
-	Name               string   `yaml:"name"`
-	FiscalYearEndMonth int      `yaml:"fiscal_year_end_month"`
-	SpreadsheetID      string   `yaml:"spreadsheet_id"`
-	Sources            []Source `yaml:"sources"`
+	Ticker             string    `yaml:"ticker"`
+	Name               string    `yaml:"name"`
+	FiscalYearEndMonth int       `yaml:"fiscal_year_end_month"`
+	SpreadsheetID      string    `yaml:"spreadsheet_id"`
+	Segments           []Segment `yaml:"segments,omitempty"`
+	Sources            []Source  `yaml:"sources"`
 }
 
 func (c Company) SheetURL() string {
@@ -30,6 +38,38 @@ func (c Company) SheetURL() string {
 		return ""
 	}
 	return "https://docs.google.com/spreadsheets/d/" + c.SpreadsheetID
+}
+
+// SegmentColumns maps a company-specific revenue line onto a 利润表 column.
+func (c Company) SegmentColumns() map[string]string {
+	if len(c.Segments) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, s := range c.Segments {
+		if s.Key != "" && s.Column != "" {
+			out[s.Key] = strings.ToUpper(s.Column)
+		}
+	}
+	return out
+}
+
+// AllowedLineItems is the extraction vocabulary for this company.
+// Product lines belong to that company. Apple is the only one whose product columns are the default template.
+func (c Company) AllowedLineItems() string {
+	const common = "total_revenue, gross_margin, net_income, diluted_eps, cash, short_term_investments, receivables, inventory, other_current_assets, long_term_investments, ppe_net, other_noncurrent_assets, accounts_payable, short_term_debt, deferred_revenue, other_current_liabilities, long_term_debt, other_noncurrent_liabilities, equity, operating_cash_flow, capex, free_cash_flow, capital_return, dividend_per_share, depreciation, other_operating, other_investing, other_financing, note"
+	if len(c.Segments) > 0 {
+		var b strings.Builder
+		for _, s := range c.Segments {
+			fmt.Fprintf(&b, "%s（%s，这是业务分部，不是公司总营收）, ", s.Key, s.Header)
+		}
+		b.WriteString(common)
+		return b.String()
+	}
+	if c.Ticker == "AAPL" {
+		return "iphone_revenue, mac_revenue, ipad_revenue, wearables_revenue, services_revenue, iphone_units, iphone_yoy, mac_yoy, ipad_yoy, wearables_yoy, services_yoy, " + common
+	}
+	return common
 }
 
 // File is the on-disk company registry.

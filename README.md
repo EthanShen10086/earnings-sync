@@ -30,13 +30,17 @@ curl -F ticker=AAPL -F file=@testdata/aapl_2026q4.csv http://127.0.0.1:8090/v1/i
 
 只想先看抽取结果、不碰表格和飞书时，才加 `-F dry_run=true`。
 
+新的一季写在同一张表的下一行，不新开文件，也不覆盖旧季度。启动服务时，已经配了 `spreadsheet_id` 的公司会自己去拉最新财报；这份文件如果已经成功写入过，不会再调用模型。黄色格子是录入，灰色公式和图会跟着新行重算。
+
+一家公司的业务分部写在 `configs/companies.yaml` 的 `segments` 里，每项是 `key`、`column`、`header`。AWS 是 Amazon 利润表里的一列，不是另一张表。换 Google、Tesla 或别的公司，改的是这一段配置，不新增程序文件。下一季追加后，「各业务收入怎么变」会把每一列都画长。利润能留下多少、家底和债务、现金怎么来怎么走，三张表共用，不随公司改名。
+
 新建一张三张报表：
 
 ```bash
-go run ./cmd/sheetcreate -title "公司名 财务报表"
+go run ./cmd/sheetcreate -ticker MSFT
 ```
 
-这一步要先做完 `docs/connect.md` 第 4 节。终端打印链接后，把其中的 spreadsheet id 写进 `configs/companies.yaml`。
+这一步要先做完 `docs/connect.md` 第 4 节。给出 `-ticker` 时，表头用这家公司的分部，并把 spreadsheet id 写回配置。服务账号建不了表时，用你自己的 Google 账号建一份同样的三张表，共享给服务账号后再把 id 写进配置。
 
 ## 其他入口
 

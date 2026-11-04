@@ -3,7 +3,9 @@ package sheet
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -11,7 +13,7 @@ import (
 
 // CreateWorkbook makes a three-statement spreadsheet owned by the authorized account
 // and, when shareWith is set, gives that person edit access. The address is not logged.
-func (g *Google) CreateWorkbook(ctx context.Context, credFile, title, shareWith string) (string, error) {
+func (g *Google) CreateWorkbook(ctx context.Context, credFile, title, shareWith string, segments []config.Segment) (string, error) {
 	if title == "" {
 		title = "财务报表"
 	}
@@ -28,14 +30,7 @@ func (g *Google) CreateWorkbook(ctx context.Context, credFile, title, shareWith 
 	}
 	_, err = g.svc.Spreadsheets.Values.BatchUpdate(ss.SpreadsheetId, &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "USER_ENTERED",
-		Data: []*sheets.ValueRange{
-			{Range: "利润表!A1:Z1", Values: [][]any{incomeHeaders()}},
-			{Range: "资产负债表!A1:AA1", Values: [][]any{balanceHeaders()}},
-			{Range: "现金流量表!A1:P1", Values: [][]any{cashHeaders()}},
-			{Range: "利润表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
-			{Range: "资产负债表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
-			{Range: "现金流量表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
-		},
+		Data:             workbookValues(segments),
 	}).Context(ctx).Do()
 	if err != nil {
 		return ss.SpreadsheetId, fmt.Errorf("表已创建但表头写入失败：%w", err)
@@ -64,8 +59,66 @@ func shareEdit(ctx context.Context, credFile, spreadsheetID, email string) error
 	return nil
 }
 
-func incomeHeaders() []any {
-	return []any{"财年", "财季", "期间", "iPhone营收_十亿美元", "Mac营收_十亿美元", "iPad营收_十亿美元", "可穿戴家居配件营收_十亿美元", "服务营收_十亿美元", "分部合计_十亿美元", "总营收_十亿美元", "分部勾稽差额_十亿美元", "毛利率", "毛利_十亿美元", "净利润_十亿美元", "稀释每股收益_美元", "iPhone出货量_百万台", "出货量口径", "总营收同比", "净利润同比", "毛利率变动_百分点", "iPhone披露同比", "Mac披露同比", "iPad披露同比", "可穿戴披露同比", "服务披露同比", "备注"}
+func workbookValues(segments []config.Segment) []*sheets.ValueRange {
+	data := []*sheets.ValueRange{
+		{Range: "利润表!A1:Z1", Values: [][]any{incomeHeaders(segments)}},
+		{Range: "资产负债表!A1:AA1", Values: [][]any{balanceHeaders()}},
+		{Range: "现金流量表!A1:P1", Values: [][]any{cashHeaders()}},
+		{Range: "利润表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
+		{Range: "资产负债表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
+		{Range: "现金流量表!C2", Values: [][]any{{`=ARRAYFORMULA(IF(A2:A80="","",A2:A80&"Q"&B2:B80))`}}},
+	}
+	if formula := segmentSumFormula(segments); formula != "" {
+		data = append(data, &sheets.ValueRange{Range: "利润表!I2", Values: [][]any{{formula}}})
+	}
+	return data
+}
+
+func segmentSumFormula(segments []config.Segment) string {
+	if len(segments) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(segments))
+	for _, s := range segments {
+		col := strings.ToUpper(strings.TrimSpace(s.Column))
+		if col == "" {
+			continue
+		}
+		parts = append(parts, col+"2:"+col+"80")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return `=ARRAYFORMULA(IF(A2:A80="","",` + strings.Join(parts, "+") + `))`
+}
+
+func incomeHeaders(segments []config.Segment) []any {
+	row := []any{"财年", "财季", "期间", "iPhone营收_十亿美元", "Mac营收_十亿美元", "iPad营收_十亿美元", "可穿戴家居配件营收_十亿美元", "服务营收_十亿美元", "分部合计_十亿美元", "总营收_十亿美元", "分部勾稽差额_十亿美元", "毛利率", "毛利_十亿美元", "净利润_十亿美元", "稀释每股收益_美元", "iPhone出货量_百万台", "出货量口径", "总营收同比", "净利润同比", "毛利率变动_百分点", "iPhone披露同比", "Mac披露同比", "iPad披露同比", "可穿戴披露同比", "服务披露同比", "备注"}
+	if len(segments) == 0 {
+		return row
+	}
+	for _, i := range []int{3, 4, 5, 6, 7, 15, 16, 20, 21, 22, 23, 24} {
+		row[i] = ""
+	}
+	for _, s := range segments {
+		idx := colIndex(s.Column)
+		if idx >= 0 && idx < len(row) {
+			row[idx] = s.Header
+		}
+	}
+	return row
+}
+
+func colIndex(col string) int {
+	col = strings.ToUpper(strings.TrimSpace(col))
+	n := 0
+	for _, r := range col {
+		if r < 'A' || r > 'Z' {
+			return -1
+		}
+		n = n*26 + int(r-'A'+1)
+	}
+	return n - 1
 }
 
 func balanceHeaders() []any {

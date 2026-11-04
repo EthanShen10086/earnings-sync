@@ -57,6 +57,8 @@ type Extraction struct {
 	Period Period
 	Facts  []Fact
 	Unit   string
+	// Columns overrides the default sheet column for a line item. It is not stored.
+	Columns map[string]string `json:"-"`
 }
 
 func (e Extraction) Fact(item string) (Fact, bool) {

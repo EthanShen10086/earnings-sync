@@ -206,7 +206,10 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		if !ok || g == nil {
 			return `{"error":"google sheets client is not configured"}`, "create_workbook no client"
 		}
-		id, err := g.CreateWorkbook(ctx, rt.CredFile, title, rt.ShareWith)
+		if title == "" {
+			title = company.Name + " 财务报表"
+		}
+		id, err := g.CreateWorkbook(ctx, rt.CredFile, title, rt.ShareWith, company.Segments)
 		if err != nil {
 			return fmt.Sprintf(`{"error":%q}`, err.Error()), "create_workbook error"
 		}
@@ -218,6 +221,9 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		return fmt.Sprintf(`{"spreadsheet_id":%q,"sheet_url":%q}`, id, company.SheetURL()), "create_workbook"
 	case "apply_chart_rules":
 		ex := extractionFromArgs(args)
+		if company, ok := rt.Companies.Get(ex.Ticker); ok && len(ex.Columns) == 0 {
+			ex.Columns = company.SegmentColumns()
+		}
 		specs := chart.Recommend(ex)
 		result.Charts = specs
 		if rt.DryRun {
@@ -227,7 +233,13 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		if !ok || company.SpreadsheetID == "" || rt.Sheets == nil {
 			return `{"error":"no spreadsheet"}`, "apply_chart_rules no sheet"
 		}
-		n, err := rt.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
+		var n int
+		var err error
+		if g, ok := rt.Sheets.(*sheet.Google); ok {
+			n, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments)
+		} else {
+			n, err = rt.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
+		}
 		if err != nil {
 			return fmt.Sprintf(`{"error":%q}`, err.Error()), "apply_chart_rules error"
 		}

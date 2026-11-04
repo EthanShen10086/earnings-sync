@@ -36,7 +36,16 @@ func Recommend(ex model.Extraction) []model.ChartSpec {
 			Source: model.SourceRule, Sheet: "利润表",
 		})
 	}
-	if hasAny(ex, "iphone_revenue", "services_revenue") {
+	if configuredSegments(ex) >= 2 {
+		out = append(out, model.ChartSpec{
+			Title: "本季业务构成", ChartType: model.ChartPie, Reason: "这一季各业务分部放在一张饼图里。分部不是公司总营收",
+			Source: model.SourceRule, Sheet: "利润表",
+		}, model.ChartSpec{
+			Title: "各业务收入怎么变", ChartType: model.ChartColumn, Reason: "每个分部一列。之后新季度写进新行，这张图跟着变长",
+			Source: model.SourceRule, Sheet: "利润表",
+		})
+	}
+	if len(ex.Columns) == 0 && hasAny(ex, "iphone_revenue", "services_revenue") {
 		out = append(out, model.ChartSpec{
 			Title: "硬件还是服务：本季收入从哪来", ChartType: model.ChartPie, Reason: "硬件卖设备，服务把利润做厚。饼图看这一季收入从哪来",
 			Source: model.SourceRule, Sheet: "利润表",
@@ -48,7 +57,7 @@ func Recommend(ex model.Extraction) []model.ChartSpec {
 			Source: model.SourceRule, Sheet: "利润表",
 		})
 	}
-	if hasAny(ex, "services_revenue", "total_revenue") {
+	if len(ex.Columns) == 0 && hasAny(ex, "services_revenue", "total_revenue") {
 		out = append(out, model.ChartSpec{
 			Title: "服务占收入的比例", ChartType: model.ChartColumn, Reason: "服务占比按财季排开，看商业模式有没有往高毛利移动",
 			Source: model.SourceRule, Sheet: "利润表",
@@ -117,6 +126,16 @@ func FromInstruction(text string, ex model.Extraction) []model.ChartSpec {
 	default:
 		return nil
 	}
+}
+
+func configuredSegments(ex model.Extraction) int {
+	n := 0
+	for key := range ex.Columns {
+		if _, ok := ex.Number(key); ok {
+			n++
+		}
+	}
+	return n
 }
 
 func segmentCount(ex model.Extraction) int {

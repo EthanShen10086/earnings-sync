@@ -1,6 +1,10 @@
 package sheet
 
-import "github.com/EthanShen10086/earnings-sync/internal/model"
+import (
+	"strings"
+
+	"github.com/EthanShen10086/earnings-sync/internal/model"
+)
 
 // inputColumns are the yellow cells. Formula columns are intentionally absent.
 var inputColumns = map[string]cellRef{
@@ -80,6 +84,14 @@ type tmplChart struct {
 	AnchorRow  int64
 	AnchorCol  int64
 	SeriesCols []int64
+}
+
+func refFor(item string, columns map[string]string) (cellRef, bool) {
+	if col, ok := columns[item]; ok && col != "" {
+		return cellRef{Sheet: "利润表", Col: strings.ToUpper(col)}, true
+	}
+	ref, ok := inputColumns[item]
+	return ref, ok
 }
 
 func templateByTitle(title string) (tmplChart, bool) {

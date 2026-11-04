@@ -124,6 +124,7 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 			ex.Period = req.Hint
 		}
 		ex.Ticker = company.Ticker
+		ex.Columns = company.SegmentColumns()
 		j.Extraction = &ex
 		return nil
 	})
@@ -164,7 +165,11 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 			j.Cells = n
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
-			_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
+			if g, ok := p.Sheets.(*sheet.Google); ok {
+				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments)
+			} else {
+				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
+			}
 			return err
 		})
 		j.Stages = append(j.Stages, stage)
@@ -228,6 +233,7 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 	defer span.End()
 	for i := range periods {
 		periods[i].Ticker = company.Ticker
+		periods[i].Columns = company.SegmentColumns()
 		j.Warnings = append(j.Warnings, reconcile.Warnings(periods[i])...)
 	}
 	latest := periods[len(periods)-1]
@@ -252,7 +258,11 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 			j.Cells = n
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
-			_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
+			if g, ok := p.Sheets.(*sheet.Google); ok {
+				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments)
+			} else {
+				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
+			}
 			return err
 		})
 		j.Stages = append(j.Stages, stage)

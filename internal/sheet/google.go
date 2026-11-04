@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -77,7 +78,7 @@ func (g *Google) UpsertAll(ctx context.Context, spreadsheetID string, periods []
 			}
 		}
 		for _, f := range ex.Facts {
-			ref, ok := inputColumns[f.LineItem]
+			ref, ok := refFor(f.LineItem, ex.Columns)
 			if !ok {
 				continue
 			}
@@ -164,6 +165,10 @@ func placeRow(resp *sheets.ValueRange, period model.Period) (int, bool) {
 }
 
 func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec) (int, error) {
+	return g.ApplyCompanyCharts(ctx, spreadsheetID, specs, nil)
+}
+
+func (g *Google) ApplyCompanyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec, segments []config.Segment) (int, error) {
 	if spreadsheetID == "" {
 		return 0, fmt.Errorf("这家公司还没有 spreadsheet_id。复制 Apple 那份表格模板，把新 id 写进 configs/companies.yaml")
 	}
@@ -184,7 +189,9 @@ func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []
 			}
 		}
 	}
-	var reqs []*sheets.Request
+	if err := g.writeAnalysis(ctx, spreadsheetID, segments); err != nil {
+		return 0, err
+	}
 	titles := map[string]tmplChart{}
 	for _, spec := range specs {
 		if spec.Source != "" && spec.Source != model.SourceRule {
@@ -196,10 +203,32 @@ func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []
 		}
 	}
 	for _, tmpl := range analysisCharts {
+		if len(segments) > 0 && (tmpl.Title == "硬件还是服务：本季收入从哪来" || tmpl.Title == "服务占收入的比例") {
+			continue
+		}
 		titles[tmpl.Title] = tmpl
 	}
-	if err := g.writeAnalysis(ctx, spreadsheetID); err != nil {
-		return 0, err
+	if len(segments) > 0 {
+		pie := segmentPie(segments)
+		titles[pie.Title] = pie
+		trend := segmentTrend(segments)
+		titles[trend.Title] = trend
+	}
+	var reqs []*sheets.Request
+	for _, sh := range ss.Sheets {
+		cols := 0
+		if sh.Properties.GridProperties != nil {
+			cols = int(sh.Properties.GridProperties.ColumnCount)
+		}
+		if cols < 40 && sh.Properties.SheetId >= 0 {
+			reqs = append(reqs, &sheets.Request{UpdateSheetProperties: &sheets.UpdateSheetPropertiesRequest{
+				Properties: &sheets.SheetProperties{
+					SheetId:        sh.Properties.SheetId,
+					GridProperties: &sheets.GridProperties{ColumnCount: 40},
+				},
+				Fields: "gridProperties.columnCount",
+			}})
+		}
 	}
 	for title, tmpl := range titles {
 		if existing[title] {
@@ -221,10 +250,10 @@ func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []
 	return len(reqs), nil
 }
 
-func (g *Google) writeAnalysis(ctx context.Context, spreadsheetID string) error {
+func (g *Google) writeAnalysis(ctx context.Context, spreadsheetID string, segments []config.Segment) error {
 	_, err := g.svc.Spreadsheets.Values.BatchUpdate(spreadsheetID, &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "USER_ENTERED",
-		Data:             analysisFormulas(),
+		Data:             analysisFormulasFor(segments),
 	}).Context(ctx).Do()
 	return err
 }

@@ -21,6 +21,19 @@ func TestSegmentGap(t *testing.T) {
 	}
 }
 
+func TestConfiguredSegmentGap(t *testing.T) {
+	ex := extraction(map[string]float64{
+		"productivity_revenue":      20,
+		"intelligent_cloud_revenue": 30,
+		"total_revenue":             55,
+	})
+	ex.Columns = map[string]string{"productivity_revenue": "D", "intelligent_cloud_revenue": "E"}
+	warns := Warnings(ex)
+	if len(warns) != 1 {
+		t.Fatalf("%#v", warns)
+	}
+}
+
 func TestCleanCashFlow(t *testing.T) {
 	ex := extraction(map[string]float64{
 		"operating_cash_flow": 28.10,

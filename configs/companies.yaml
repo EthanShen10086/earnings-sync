@@ -20,6 +20,23 @@ companies:
     sources:
       - type: sec_edgar
         cik: "0001318605"
+  - ticker: AMZN
+    name: Amazon
+    fiscal_year_end_month: 12
+    spreadsheet_id: 1eugXH5Ic7QOtmvuDQpos4OnWFTKY6kqUzN6oLw9-7Sg
+    segments:
+      - key: north_america_revenue
+        column: D
+        header: 北美净销售额_十亿美元
+      - key: international_revenue
+        column: E
+        header: 国际净销售额_十亿美元
+      - key: aws_revenue
+        column: F
+        header: AWS净销售额_十亿美元
+    sources:
+      - type: sec_edgar
+        cik: "0001018724"
   - ticker: SPACEX
     name: SpaceX
     fiscal_year_end_month: 12

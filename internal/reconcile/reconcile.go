@@ -3,6 +3,7 @@ package reconcile
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 )
@@ -10,7 +11,7 @@ import (
 // Warnings compares related facts. Small rounding stays visible; it does not fail the job.
 func Warnings(ex model.Extraction) []string {
 	var out []string
-	segments := []string{"iphone_revenue", "mac_revenue", "ipad_revenue", "wearables_revenue", "services_revenue"}
+	segments := segmentKeys(ex)
 	sum := 0.0
 	n := 0
 	for _, item := range segments {
@@ -38,6 +39,18 @@ func Warnings(ex model.Extraction) []string {
 		out = append(out, fmt.Sprintf("毛利率 %.4f 不在 0 到 1 之间", gm))
 	}
 	return out
+}
+
+func segmentKeys(ex model.Extraction) []string {
+	if len(ex.Columns) > 0 {
+		keys := make([]string, 0, len(ex.Columns))
+		for key := range ex.Columns {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+	return []string{"iphone_revenue", "mac_revenue", "ipad_revenue", "wearables_revenue", "services_revenue"}
 }
 
 func round2(v float64) float64 {

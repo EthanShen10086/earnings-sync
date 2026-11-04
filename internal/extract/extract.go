@@ -18,10 +18,11 @@ const extractSystem = `你是财报结构化抽取器。只输出 JSON，不要�
 短期借款 short_term_debt = 商业票据 + 一年内到期的长期债务。
 other_noncurrent_assets = 无形资产 + 其他非流动资产。
 无法确定的字段省略，不要猜 0。
-同时用简体中文写 analysis，6 到 8 条，每条不超过 80 字，依次覆盖：这季异常好的数据、异常坏的数据、业务结构、靠什么赚钱、资产负债表健康度、公司质地。只根据正文，不要编造。
+同时用简体中文写 analysis，6 到 8 条，每条不超过 80 字。利润表、现金流量表、资产负债表都要写到。
+依次覆盖：利润表里异常好的、异常坏的、业务结构（分部收入不要当成公司总营收）、怎么赚钱、现金流量表、资产负债表健康度、公司质地。只根据正文，不要编造。
 JSON 形状：
 {"periods":[{"fiscal_year":2026,"fiscal_quarter":4,"facts":[{"line_item":"total_revenue","value":114.48,"unit":"billion_usd"},{"line_item":"cash","value":36.31,"unit":"billion_usd"}]}],"analysis":["好：……","坏：……","结构：……","赚钱：……","负债表：……","质地：……"]}
-line_item 只用这些键：total_revenue, iphone_revenue, mac_revenue, ipad_revenue, wearables_revenue, services_revenue, gross_margin, net_income, diluted_eps, iphone_units, iphone_yoy, mac_yoy, ipad_yoy, wearables_yoy, services_yoy, cash, short_term_investments, receivables, inventory, other_current_assets, long_term_investments, ppe_net, other_noncurrent_assets, accounts_payable, short_term_debt, deferred_revenue, other_current_liabilities, long_term_debt, other_noncurrent_liabilities, equity, operating_cash_flow, capex, free_cash_flow, capital_return, dividend_per_share, depreciation, other_operating, other_investing, other_financing, note`
+line_item 只用用户消息里列出的键。`
 
 const takeawaySystem = `你是买方研究员。根据下面已经换算好的财季数字，用简体中文写 6 条解读，每条不超过 70 字。
 依次覆盖：这季异常好的一点、异常坏的一点、收入结构、公司靠什么赚钱、资产负债表健康度、公司质地。
@@ -44,8 +45,8 @@ func (e Extractor) FromDocument(ctx context.Context, doc model.Document, company
 	if len(text) > 24000 {
 		text = text[:24000]
 	}
-	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准，不要被文件发布日期带偏。提示期间：%s\n\n%s",
-		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), text)
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准，不要被文件发布日期带偏。提示期间：%s\n允许的 line_item：%s\n\n%s",
+		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), text)
 	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
 	if err != nil {
 		return model.Extraction{}, usage, err
@@ -63,8 +64,8 @@ func (e Extractor) ParseReport(ctx context.Context, doc model.Document, company 
 	if len(text) > 24000 {
 		text = text[:24000]
 	}
-	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准。提示期间：%s\n\n%s",
-		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), text)
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准。提示期间：%s\n允许的 line_item：%s\n\n%s",
+		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), text)
 	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
 	if err != nil {
 		return nil, nil, usage, err

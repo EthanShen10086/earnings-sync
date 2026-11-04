@@ -1,6 +1,10 @@
 package sheet
 
 import (
+	"strconv"
+	"strings"
+
+	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"google.golang.org/api/sheets/v4"
 )
@@ -19,37 +23,58 @@ var analysisCharts = []tmplChart{
 }
 
 func analysisFormulas() []*sheets.ValueRange {
+	return analysisFormulasFor(nil)
+}
+
+func analysisFormulasFor(segments []config.Segment) []*sheets.ValueRange {
 	last := func(col string) string {
 		return `IFERROR(INDEX(` + col + `:` + col + `,MAX(FILTER(ROW($A$2:$A$80),$A$2:$A$80<>""))),"")`
 	}
 	hardware := `IFERROR(` + last("D") + `+` + last("E") + `+` + last("F") + `+` + last("G") + `,"")`
-	return []*sheets.ValueRange{
-		{Range: "利润表!A120:B122", Values: [][]any{
-			{"来源", "十亿美元"},
-			{"硬件", "=" + hardware},
-			{"服务", "=" + last("H")},
-		}},
+	income := &sheets.ValueRange{Range: "利润表!A120:B122", Values: [][]any{
+		{"来源", "十亿美元"},
+		{"硬件", "=" + hardware},
+		{"服务", "=" + last("H")},
+	}}
+	share := &sheets.ValueRange{Range: "利润表!A140:B141", Values: [][]any{
+		{"期间", "服务占收入"},
+		{`=FILTER(C2:C80,A2:A80<>"")`, `=FILTER(ARRAYFORMULA(IFERROR(H2:H80/J2:J80)),A2:A80<>"")`},
+	}}
+	if len(segments) > 0 {
+		rows := [][]any{{"来源", "十亿美元"}}
+		for _, s := range segments {
+			rows = append(rows, []any{s.Header, "=" + last(s.Column)})
+		}
+		income = &sheets.ValueRange{Range: "利润表!A120:B" + strconv.Itoa(119+len(rows)), Values: rows}
+		share = nil
+	}
+	out := []*sheets.ValueRange{
+		income,
 		{Range: "利润表!D120:E122", Values: [][]any{
 			{"项目", "十亿美元"},
 			{"总营收", "=" + last("J")},
 			{"净利润", "=" + last("N")},
 		}},
-		{Range: "利润表!A140:B141", Values: [][]any{
-			{"期间", "服务占收入"},
-			{`=FILTER(C2:C80,A2:A80<>"")`, `=FILTER(ARRAYFORMULA(IFERROR(H2:H80/J2:J80)),A2:A80<>"")`},
-		}},
-		{Range: "资产负债表!A120:B123", Values: [][]any{
+	}
+	if share != nil {
+		out = append(out, share)
+	}
+	if history := segmentHistory(segments); history != nil {
+		out = append(out, history)
+	}
+	out = append(out,
+		&sheets.ValueRange{Range: "资产负债表!A120:B123", Values: [][]any{
 			{"项目", "十亿美元"},
 			{"现金及证券", "=IFERROR(" + last("D") + "+" + last("E") + "+" + last("J") + `,"")`},
 			{"有息债务", "=IFERROR(" + last("P") + "+" + last("T") + `,"")`},
 			{"股东权益", "=" + last("X")},
 		}},
-		{Range: "资产负债表!D120:E122", Values: [][]any{
+		&sheets.ValueRange{Range: "资产负债表!D120:E122", Values: [][]any{
 			{"项目", "十亿美元"},
 			{"存货", "=" + last("G")},
 			{"应收账款", "=" + last("F")},
 		}},
-		{Range: "资产负债表!A140:C141", Values: [][]any{
+		&sheets.ValueRange{Range: "资产负债表!A140:C141", Values: [][]any{
 			{"期间", "净现金_十亿美元", "有息债务_十亿美元"},
 			{
 				`=FILTER(C2:C80,A2:A80<>"")`,
@@ -57,14 +82,14 @@ func analysisFormulas() []*sheets.ValueRange {
 				`=FILTER(P2:P80+T2:T80,A2:A80<>"")`,
 			},
 		}},
-		{Range: "现金流量表!A120:B124", Values: [][]any{
+		&sheets.ValueRange{Range: "现金流量表!A120:B124", Values: [][]any{
 			{"项目", "十亿美元"},
 			{"经营现金流", "=" + last("E")},
 			{"资本开支", "=" + last("F")},
 			{"自由现金流", "=" + last("G")},
 			{"资本返还", "=" + last("J")},
 		}},
-		{Range: "现金流量表!A140:C141", Values: [][]any{
+		&sheets.ValueRange{Range: "现金流量表!A140:C141", Values: [][]any{
 			{"期间", "经营现金流_十亿美元", "资本返还_十亿美元"},
 			{
 				`=FILTER(C2:C80,A2:A80<>"")`,
@@ -72,5 +97,52 @@ func analysisFormulas() []*sheets.ValueRange {
 				`=FILTER(J2:J80,A2:A80<>"")`,
 			},
 		}},
+	)
+	return out
+}
+
+func segmentHistory(segments []config.Segment) *sheets.ValueRange {
+	if len(segments) == 0 {
+		return nil
+	}
+	header := []any{"期间"}
+	row := []any{`=FILTER(C2:C80,A2:A80<>"")`}
+	for _, s := range segments {
+		col := strings.ToUpper(s.Column)
+		header = append(header, s.Header)
+		row = append(row, `=FILTER(`+col+`2:`+col+`80,A2:A80<>"")`)
+	}
+	end := colLetter(len(segments))
+	return &sheets.ValueRange{Range: "利润表!A160:" + end + "161", Values: [][]any{header, row}}
+}
+
+func colLetter(index int) string {
+	n := index + 1
+	s := ""
+	for n > 0 {
+		n--
+		s = string(rune('A'+n%26)) + s
+		n /= 26
+	}
+	return s
+}
+
+func segmentPie(segments []config.Segment) tmplChart {
+	return tmplChart{
+		Title: "本季业务构成", Sheet: "利润表", Type: model.ChartPie,
+		DomainCol: 0, SeriesCol: 1, HeaderRow: 119, EndRow: 120 + int64(len(segments)),
+		AnchorRow: 160, AnchorCol: 26,
+	}
+}
+
+func segmentTrend(segments []config.Segment) tmplChart {
+	cols := make([]int64, len(segments))
+	for i := range segments {
+		cols[i] = int64(i + 1)
+	}
+	return tmplChart{
+		Title: "各业务收入怎么变", Sheet: "利润表", Type: model.ChartColumn,
+		DomainCol: 0, SeriesCols: cols, HeaderRow: 159, EndRow: 185,
+		AnchorRow: 220, AnchorCol: 26,
 	}
 }
