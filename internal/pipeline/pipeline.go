@@ -388,7 +388,12 @@ func (p *Pipeline) Apply(ctx context.Context, jobID, instruction string, rules b
 	if company.SpreadsheetID == "" || p.Sheets == nil {
 		return specs, fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
 	}
-	if _, err := p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs); err != nil {
+	if g, ok := p.Sheets.(*sheet.Google); ok {
+		_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments)
+	} else {
+		_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return specs, nil
