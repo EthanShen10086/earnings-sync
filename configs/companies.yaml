@@ -37,6 +37,20 @@ companies:
     sources:
       - type: sec_edgar
         cik: "0001018724"
+  - ticker: MSFT
+    name: Microsoft
+    fiscal_year_end_month: 6
+    spreadsheet_id: 131ZB2Qx0tQH7eaYD6zG1dpIXrq_j8dNZVsPYq_b9Bbg
+    segments:
+      - key: agents_and_infra_revenue
+        column: D
+        header: 智能体与基础设施_十亿美元
+      - key: devices_and_consumer_revenue
+        column: E
+        header: 设备与消费者_十亿美元
+    sources:
+      - type: sec_edgar
+        cik: "0000789019"
   - ticker: SPACEX
     name: SpaceX
     fiscal_year_end_month: 12
