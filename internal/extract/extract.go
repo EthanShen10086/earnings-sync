@@ -45,8 +45,8 @@ func (e Extractor) FromDocument(ctx context.Context, doc model.Document, company
 	if len(text) > 24000 {
 		text = text[:24000]
 	}
-	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准，不要被文件发布日期带偏。提示期间：%s\n允许的 line_item：%s\n\n%s",
-		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), text)
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准，不要被文件发布日期带偏。提示期间：%s\n允许的 line_item：%s\n%s\n\n%s",
+		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), companyNote(company), text)
 	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
 	if err != nil {
 		return model.Extraction{}, usage, err
@@ -64,8 +64,8 @@ func (e Extractor) ParseReport(ctx context.Context, doc model.Document, company 
 	if len(text) > 24000 {
 		text = text[:24000]
 	}
-	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准。提示期间：%s\n允许的 line_item：%s\n\n%s",
-		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), text)
+	user := fmt.Sprintf("公司 %s (%s)，财年截止月 %d。财季以正文的季度截止日和这个截止月为准。提示期间：%s\n允许的 line_item：%s\n%s\n\n%s",
+		company.Name, company.Ticker, company.FiscalYearEndMonth, hint.Label(), company.AllowedLineItems(), companyNote(company), text)
 	raw, usage, err := e.Model.Complete(ctx, extractSystem, user)
 	if err != nil {
 		return nil, nil, usage, err
@@ -102,6 +102,13 @@ func (e Extractor) Takeaway(ctx context.Context, ex model.Extraction, warnings [
 		return fallbackTakeaway(ex, warnings), usage, nil
 	}
 	return parsed.Takeaway, usage, nil
+}
+
+func companyNote(company config.Company) string {
+	if strings.TrimSpace(company.Prompt) == "" {
+		return ""
+	}
+	return "公司专用口径：" + strings.TrimSpace(company.Prompt)
 }
 
 func decodeModel(raw, ticker string) (model.Extraction, error) {
