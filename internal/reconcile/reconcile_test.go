@@ -44,3 +44,24 @@ func TestCleanCashFlow(t *testing.T) {
 		t.Fatalf("%#v", Warnings(ex))
 	}
 }
+
+func TestOperatingSegmentsReconcileToDisclosedTotal(t *testing.T) {
+	ex := extraction(map[string]float64{
+		"insurance_underwriting":       1.352,
+		"insurance_investment_income":  2.734,
+		"bnsf_earnings":                1.729,
+		"bhe_earnings":                 1.612,
+		"msr_earnings":                 4.042,
+		"other_operating":              1.236,
+		"disclosed_operating_earnings": 12.705,
+		"total_revenue":                105.647,
+	})
+	ex.Columns = map[string]string{
+		"insurance_underwriting": "D", "insurance_investment_income": "E",
+		"bnsf_earnings": "F", "bhe_earnings": "G", "msr_earnings": "H", "other_operating": "I",
+	}
+	ex.SegmentTotal = "disclosed_operating_earnings"
+	if len(Warnings(ex)) != 0 {
+		t.Fatalf("should tie to operating earnings, got %#v", Warnings(ex))
+	}
+}

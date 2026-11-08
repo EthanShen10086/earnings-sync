@@ -20,10 +20,16 @@ func Warnings(ex model.Extraction) []string {
 			n++
 		}
 	}
-	if total, ok := ex.Number("total_revenue"); ok && n == len(segments) {
+	totalKey := "total_revenue"
+	totalLabel := "总营收"
+	if ex.SegmentTotal != "" {
+		totalKey = ex.SegmentTotal
+		totalLabel = "披露合计"
+	}
+	if total, ok := ex.Number(totalKey); ok && n == len(segments) && len(segments) > 0 {
 		diff := round2(total - sum)
 		if diff != 0 {
-			out = append(out, fmt.Sprintf("分部合计 %.2f 与总营收 %.2f 相差 %.2f 十亿美元", sum, total, diff))
+			out = append(out, fmt.Sprintf("分部合计 %.2f 与%s %.2f 相差 %.2f 十亿美元", sum, totalLabel, total, diff))
 		}
 	}
 	ocf, hasOCF := ex.Number("operating_cash_flow")
