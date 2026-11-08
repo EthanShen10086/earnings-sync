@@ -51,6 +51,218 @@ companies:
     sources:
       - type: sec_edgar
         cik: "0000789019"
+  - ticker: BRK
+    name: Berkshire Hathaway
+    fiscal_year_end_month: 12
+    spreadsheet_id: 1RbIXpks5dvj9IntzmOC3TKJQnlYHwm3lz1AcKRZNgTA
+    segment_total: disclosed_operating_earnings
+    prompt: |
+      财年是自然年。金额用十亿美元。比率用小数，91.4% 写成 0.914。股数用股，不要换成十亿股。每股收益用美元。
+      六个经营利润分部是税后、归属于伯克希尔股东的金额，不是税前，也不是营收。只用「三个月 / Third Quarter」那一列，不要把前九个月累计写进当季。
+      insurance_investment_income 是保险浮存金的利息和股息。other_operating 含汇兑、公司利息和权益法，不是铁路、能源或制造。
+      disclosed_operating_earnings 是公告里的经营利润合计。disclosed_net_income 和 net_income 都写公告里的归母净利润。investment_gains 是税后投资损益，含未实现。没有卡夫亨氏减值就省略 kraft_impairment，不要填 0。
+      现金流量表如果只有年初至今，写入 ytd_ 开头的字段，不要把九个月的数写入 operating_cash_flow 或 capex。
+      cash 是保险及其他现金，不是铁路能源现金。short_term_investments 是短期美国国债。long_term_debt 是铁路和能源借款。equity 是披露的归母权益。float 是保险浮存金。
+    segments:
+      - key: insurance_underwriting
+        column: D
+        header: 保险承保_税后_十亿美元
+      - key: insurance_investment_income
+        column: E
+        header: 保险投资收益_税后_十亿美元
+      - key: bnsf_earnings
+        column: F
+        header: 铁路BNSF_税后_十亿美元
+      - key: bhe_earnings
+        column: G
+        header: 能源BHE_税后_十亿美元
+      - key: msr_earnings
+        column: H
+        header: 制造服务零售_税后_十亿美元
+      - key: other_operating
+        column: I
+        header: 其他经营_税后_十亿美元
+    lines:
+      - key: disclosed_operating_earnings
+        column: K
+        header: 披露经营利润_十亿美元
+      - key: investment_gains
+        column: N
+        header: 投资损益_税后_十亿美元
+      - key: kraft_impairment
+        column: O
+        header: 卡夫亨氏减值_税后_十亿美元
+      - key: net_income
+        column: Q
+        header: 披露归母净利润_十亿美元
+      - key: disclosed_net_income
+        column: Q
+        header: 披露归母净利润_十亿美元
+      - key: eps_class_a
+        column: S
+        header: 每股收益A类_美元
+      - key: eps_class_b
+        column: T
+        header: 每股收益B类_美元
+      - key: weighted_class_a_shares
+        column: U
+        header: 加权等效A类股
+      - key: total_revenue
+        column: AB
+        header: 总营收_十亿美元
+      - key: premiums_earned
+        column: AC
+        header: 已赚保费_十亿美元
+      - key: bnsf_revenue
+        column: AD
+        header: 铁路营收_十亿美元
+      - key: bhe_revenue
+        column: AE
+        header: 能源营收_十亿美元
+      - key: msr_revenue
+        column: AF
+        header: 制造服务零售营收_十亿美元
+      - key: geico_combined_ratio
+        column: AL
+        header: GEICO综合成本率
+      - key: geico_loss_ratio
+        column: AM
+        header: GEICO赔付率
+      - key: geico_expense_ratio
+        column: AN
+        header: GEICO费用率
+      - key: bnsf_volume_yoy
+        column: AO
+        header: BNSF运量同比
+      - key: bhe_pretax
+        column: AP
+        header: BHE税前_十亿美元
+      - key: bhe_tax_expense
+        column: AQ
+        header: BHE所得税费用_十亿美元_负数表示收益
+      - key: cash
+        sheet: 资产负债表
+        column: D
+        header: 保险及其他现金_十亿美元
+      - key: railroad_energy_cash
+        sheet: 资产负债表
+        column: E
+        header: 铁路能源现金_十亿美元
+      - key: short_term_investments
+        sheet: 资产负债表
+        column: G
+        header: 短期美国国债_十亿美元
+      - key: fixed_maturity
+        sheet: 资产负债表
+        column: H
+        header: 固收证券_十亿美元
+      - key: equity_securities
+        sheet: 资产负债表
+        column: I
+        header: 权益证券_十亿美元
+      - key: equity_method
+        sheet: 资产负债表
+        column: J
+        header: 权益法投资_十亿美元
+      - key: loans_receivable
+        sheet: 资产负债表
+        column: K
+        header: 贷款及应收融资_十亿美元
+      - key: receivables
+        sheet: 资产负债表
+        column: L
+        header: 其他应收_十亿美元
+      - key: inventory
+        sheet: 资产负债表
+        column: M
+        header: 存货_十亿美元
+      - key: ppe_insurance
+        sheet: 资产负债表
+        column: N
+        header: 保险及其他固定资产_十亿美元
+      - key: ppe_rail_energy
+        sheet: 资产负债表
+        column: O
+        header: 铁路能源固定资产_十亿美元
+      - key: equipment_lease
+        sheet: 资产负债表
+        column: P
+        header: 租赁设备_十亿美元
+      - key: goodwill_insurance
+        sheet: 资产负债表
+        column: Q
+        header: 商誉_保险及其他_十亿美元
+      - key: goodwill_rail_energy
+        sheet: 资产负债表
+        column: R
+        header: 商誉_铁路能源_十亿美元
+      - key: unpaid_losses
+        sheet: 资产负债表
+        column: AB
+        header: 未决赔款_十亿美元
+      - key: borrowings_insurance
+        sheet: 资产负债表
+        column: AJ
+        header: 保险及其他借款_十亿美元
+      - key: accounts_payable
+        sheet: 资产负债表
+        column: AG
+        header: 保险及其他应付_十亿美元
+      - key: long_term_debt
+        sheet: 资产负债表
+        column: AM
+        header: 铁路能源借款_十亿美元
+      - key: equity
+        sheet: 资产负债表
+        column: AY
+        header: 披露归母权益_十亿美元
+      - key: float
+        sheet: 资产负债表
+        column: BA
+        header: 保险浮存金_十亿美元
+      - key: class_a_shares_outstanding
+        sheet: 资产负债表
+        column: BC
+        header: 期末等效A类流通股
+      - key: operating_cash_flow
+        sheet: 现金流量表
+        column: E
+        header: 当季经营现金流_十亿美元_没有单季就省略
+      - key: capex
+        sheet: 现金流量表
+        column: F
+        header: 当季资本开支_十亿美元
+      - key: capital_return
+        sheet: 现金流量表
+        column: H
+        header: 当季回购_权益表计提_十亿美元
+      - key: ytd_operating_cash_flow
+        sheet: 现金流量表
+        column: I
+        header: 年初至今经营现金流_十亿美元
+      - key: ytd_capex
+        sheet: 现金流量表
+        column: J
+        header: 年初至今资本开支_十亿美元
+      - key: ytd_equity_purchases
+        sheet: 现金流量表
+        column: K
+        header: 年初至今购买权益证券_十亿美元
+      - key: ytd_equity_sales
+        sheet: 现金流量表
+        column: L
+        header: 年初至今出售权益证券_十亿美元
+      - key: ytd_acquisitions
+        sheet: 现金流量表
+        column: M
+        header: 年初至今收购企业_十亿美元
+      - key: ytd_buyback_cash
+        sheet: 现金流量表
+        column: N
+        header: 年初至今回购_现金口径_十亿美元
+    sources:
+      - type: sec_edgar
+        cik: "0001067983"
   - ticker: SPACEX
     name: SpaceX
     fiscal_year_end_month: 12

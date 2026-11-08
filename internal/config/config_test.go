@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/EthanShen10086/earnings-sync/internal/model"
 )
 
 func TestLoadCompanies(t *testing.T) {
@@ -69,6 +72,31 @@ func TestAllowedLineItemsStayWithTheCompany(t *testing.T) {
 	got := amazon.AllowedLineItems()
 	if !strings.Contains(got, "aws_revenue") || strings.Contains(got, "iphone") {
 		t.Fatal(got)
+	}
+}
+
+func TestBerkshireUsesItsOwnCells(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	reg, err := Load(filepath.Join(filepath.Dir(file), "..", "..", "configs", "companies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	brk, ok := reg.Get("BRK")
+	if !ok || !brk.UsesMappedLayout() || brk.SegmentTotal != "disclosed_operating_earnings" {
+		t.Fatalf("%+v", brk)
+	}
+	items := brk.AllowedLineItems()
+	if strings.Contains(items, "iphone") || !strings.Contains(items, "insurance_underwriting") || !strings.Contains(items, "ytd_operating_cash_flow") {
+		t.Fatal(items)
+	}
+	cells := brk.InputCells()
+	if cells["short_term_investments"] != "资产负债表!G" || cells["bnsf_earnings"] != "利润表!F" || cells["capex"] != "现金流量表!F" {
+		t.Fatalf("%v", cells)
+	}
+	var ex model.Extraction
+	brk.Bind(&ex)
+	if !ex.MappedOnly || ex.SegmentTotal != "disclosed_operating_earnings" || ex.Columns["bnsf_earnings"] != "F" {
+		t.Fatalf("%+v", ex)
 	}
 }
 

@@ -21,7 +21,9 @@ const maxTurns = 6
 const systemPrompt = `你是财报操作代理，不是只会回答的聊天机器人。
 你必须通过工具完成动作。不要声称已经改了表格，除非工具返回成功。
 可以做的事：查看已登记公司、把一季数字写入已有表格、新建三张报表、按规则生成图表、把 takeaway 发到飞书。
-没有 spreadsheet_id 时先 create_workbook，再 upsert_period。
+每家公司的字段和阅读口径以登记配置为准。配置列出了黄色格时，只写那些字段，不要套用别的公司的列。
+怎么分析由财报正文和该公司自己的提示决定，不要套一套固定的行业结论。
+没有 spreadsheet_id 时先 create_workbook，再 upsert_period。已经按自己的列登记过的公司不要新建空表。
 金额用十亿美元。毛利率和同比用小数。不要发明工具名。
 最后用一句中文说明你实际调用了哪些工具。`
 
@@ -171,12 +173,15 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		return string(b), "list_companies"
 	case "upsert_period":
 		ex := extractionFromArgs(args)
+		company, ok := rt.Companies.Get(ex.Ticker)
+		if ok {
+			company.Bind(&ex)
+		}
 		result.Extraction = &ex
 		result.Warnings = reconcile.Warnings(ex)
 		if rt.DryRun {
 			return `{"dry_run":true,"would_write":true}`, "upsert_period dry_run"
 		}
-		company, ok := rt.Companies.Get(ex.Ticker)
 		if !ok {
 			return `{"error":"unknown ticker"}`, "upsert_period unknown"
 		}
@@ -198,6 +203,12 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		company, ok := rt.Companies.Get(ticker)
 		if !ok {
 			return `{"error":"unknown ticker"}`, "create_workbook unknown"
+		}
+		if company.UsesMappedLayout() {
+			if company.SpreadsheetID != "" {
+				return fmt.Sprintf(`{"spreadsheet_id":%q,"sheet_url":%q,"kept":true}`, company.SpreadsheetID, company.SheetURL()), "create_workbook kept mapped sheet"
+			}
+			return `{"error":"这家公司的黄色格已经在配置里列明，不能按苹果模板新建空表"}`, "create_workbook mapped"
 		}
 		if rt.DryRun {
 			return `{"dry_run":true,"would_create":true}`, "create_workbook dry_run"
@@ -221,8 +232,8 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		return fmt.Sprintf(`{"spreadsheet_id":%q,"sheet_url":%q}`, id, company.SheetURL()), "create_workbook"
 	case "apply_chart_rules":
 		ex := extractionFromArgs(args)
-		if company, ok := rt.Companies.Get(ex.Ticker); ok && len(ex.Columns) == 0 {
-			ex.Columns = company.SegmentColumns()
+		if company, ok := rt.Companies.Get(ex.Ticker); ok {
+			company.Bind(&ex)
 		}
 		specs := chart.Recommend(ex)
 		result.Charts = specs
@@ -236,7 +247,7 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		var n int
 		var err error
 		if g, ok := rt.Sheets.(*sheet.Google); ok {
-			n, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments)
+			n, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments, company.UsesMappedLayout())
 		} else {
 			n, err = rt.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
 		}

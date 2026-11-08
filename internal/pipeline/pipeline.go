@@ -124,7 +124,7 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 			ex.Period = req.Hint
 		}
 		ex.Ticker = company.Ticker
-		ex.Columns = company.SegmentColumns()
+		company.Bind(&ex)
 		j.Extraction = &ex
 		return nil
 	})
@@ -166,7 +166,7 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
 			if g, ok := p.Sheets.(*sheet.Google); ok {
-				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments)
+				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments, company.UsesMappedLayout())
 			} else {
 				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
 			}
@@ -233,7 +233,7 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 	defer span.End()
 	for i := range periods {
 		periods[i].Ticker = company.Ticker
-		periods[i].Columns = company.SegmentColumns()
+		company.Bind(&periods[i])
 		j.Warnings = append(j.Warnings, reconcile.Warnings(periods[i])...)
 	}
 	latest := periods[len(periods)-1]
@@ -259,7 +259,7 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
 			if g, ok := p.Sheets.(*sheet.Google); ok {
-				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments)
+				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments, company.UsesMappedLayout())
 			} else {
 				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
 			}
@@ -389,7 +389,7 @@ func (p *Pipeline) Apply(ctx context.Context, jobID, instruction string, rules b
 		return specs, fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
 	}
 	if g, ok := p.Sheets.(*sheet.Google); ok {
-		_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments)
+		_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments, company.UsesMappedLayout())
 	} else {
 		_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
 	}

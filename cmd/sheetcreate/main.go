@@ -53,6 +53,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "配置里没有 %s。先写进 configs/companies.yaml。\n", *ticker)
 			os.Exit(1)
 		}
+		if company.UsesMappedLayout() {
+			fmt.Fprintf(os.Stderr, "%s 的黄色格已经在配置里列明，不能按苹果模板另建一张表。现有表格：%s\n", company.Ticker, company.SheetURL())
+			os.Exit(1)
+		}
 		segments = company.Segments
 		if *title == "" {
 			*title = company.Name + " 财务报表"

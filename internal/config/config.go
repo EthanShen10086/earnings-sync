@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,11 +17,20 @@ type Source struct {
 	URL  string `yaml:"url"`
 }
 
-// Segment is one revenue line that differs by company. Apple uses iPhone; Amazon uses AWS.
+// Segment is one revenue or earnings line that differs by company. Apple uses iPhone; Amazon uses AWS.
 type Segment struct {
 	Key    string `yaml:"key"`
 	Column string `yaml:"column"`
 	Header string `yaml:"header"`
+}
+
+// Line is one yellow input cell. Sheet defaults to 利润表.
+// A company that sets lines does not use Apple's column positions.
+type Line struct {
+	Key    string `yaml:"key"`
+	Sheet  string `yaml:"sheet,omitempty"`
+	Column string `yaml:"column"`
+	Header string `yaml:"header,omitempty"`
 }
 
 // Company is a tracked issuer. SpreadsheetID may be empty until a template is copied.
@@ -30,6 +40,9 @@ type Company struct {
 	FiscalYearEndMonth int       `yaml:"fiscal_year_end_month"`
 	SpreadsheetID      string    `yaml:"spreadsheet_id"`
 	Segments           []Segment `yaml:"segments,omitempty"`
+	Lines              []Line    `yaml:"lines,omitempty"`
+	SegmentTotal       string    `yaml:"segment_total,omitempty"`
+	Prompt             string    `yaml:"prompt,omitempty"`
 	Sources            []Source  `yaml:"sources"`
 }
 
@@ -40,7 +53,13 @@ func (c Company) SheetURL() string {
 	return "https://docs.google.com/spreadsheets/d/" + c.SpreadsheetID
 }
 
-// SegmentColumns maps a company-specific revenue line onto a 利润表 column.
+// UsesMappedLayout is true when yellow cells are listed explicitly.
+// Those companies must not fall back to Apple's column positions.
+func (c Company) UsesMappedLayout() bool {
+	return len(c.Lines) > 0
+}
+
+// SegmentColumns maps a company-specific line onto a 利润表 column.
 func (c Company) SegmentColumns() map[string]string {
 	if len(c.Segments) == 0 {
 		return nil
@@ -54,10 +73,73 @@ func (c Company) SegmentColumns() map[string]string {
 	return out
 }
 
+// InputCells maps every yellow input, including other statements, as "表!列".
+func (c Company) InputCells() map[string]string {
+	if !c.UsesMappedLayout() {
+		return nil
+	}
+	out := map[string]string{}
+	for _, s := range c.Segments {
+		if s.Key != "" && s.Column != "" {
+			out[s.Key] = "利润表!" + strings.ToUpper(s.Column)
+		}
+	}
+	for _, ln := range c.Lines {
+		if ln.Key == "" || ln.Column == "" {
+			continue
+		}
+		sheet := ln.Sheet
+		if sheet == "" {
+			sheet = "利润表"
+		}
+		out[ln.Key] = sheet + "!" + strings.ToUpper(ln.Column)
+	}
+	return out
+}
+
+// Bind attaches this company's columns to an extraction before reconcile or write.
+func (c Company) Bind(ex *model.Extraction) {
+	if ex == nil {
+		return
+	}
+	if ex.Ticker == "" {
+		ex.Ticker = c.Ticker
+	}
+	ex.Columns = c.SegmentColumns()
+	ex.Cells = c.InputCells()
+	ex.MappedOnly = c.UsesMappedLayout()
+	ex.SegmentTotal = c.SegmentTotal
+}
+
 // AllowedLineItems is the extraction vocabulary for this company.
 // Product lines belong to that company. Apple is the only one whose product columns are the default template.
 func (c Company) AllowedLineItems() string {
 	const common = "total_revenue, gross_margin, net_income, diluted_eps, cash, short_term_investments, receivables, inventory, other_current_assets, long_term_investments, ppe_net, other_noncurrent_assets, accounts_payable, short_term_debt, deferred_revenue, other_current_liabilities, long_term_debt, other_noncurrent_liabilities, equity, operating_cash_flow, capex, free_cash_flow, capital_return, dividend_per_share, depreciation, other_operating, other_investing, other_financing, note"
+	if c.UsesMappedLayout() {
+		var b strings.Builder
+		seen := map[string]struct{}{}
+		write := func(key, header string) {
+			if key == "" {
+				return
+			}
+			if _, ok := seen[key]; ok {
+				return
+			}
+			seen[key] = struct{}{}
+			if header != "" {
+				fmt.Fprintf(&b, "%s（%s）, ", key, header)
+				return
+			}
+			fmt.Fprintf(&b, "%s, ", key)
+		}
+		for _, s := range c.Segments {
+			write(s.Key, s.Header)
+		}
+		for _, ln := range c.Lines {
+			write(ln.Key, ln.Header)
+		}
+		return strings.TrimSuffix(b.String(), ", ")
+	}
 	if len(c.Segments) > 0 {
 		var b strings.Builder
 		for _, s := range c.Segments {

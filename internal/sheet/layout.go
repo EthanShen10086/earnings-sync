@@ -87,11 +87,46 @@ type tmplChart struct {
 }
 
 func refFor(item string, columns map[string]string) (cellRef, bool) {
-	if col, ok := columns[item]; ok && col != "" {
+	return locate(item, model.Extraction{Columns: columns})
+}
+
+// locate picks the yellow cell for a fact. Mapped companies never fall through to Apple's columns.
+func locate(item string, ex model.Extraction) (cellRef, bool) {
+	if ex.MappedOnly {
+		if loc, ok := ex.Cells[item]; ok && loc != "" {
+			return parseLoc(loc)
+		}
+		if col, ok := ex.Columns[item]; ok && col != "" {
+			return cellRef{Sheet: "利润表", Col: strings.ToUpper(col)}, true
+		}
+		return cellRef{}, false
+	}
+	if col, ok := ex.Columns[item]; ok && col != "" {
 		return cellRef{Sheet: "利润表", Col: strings.ToUpper(col)}, true
+	}
+	if loc, ok := ex.Cells[item]; ok && loc != "" {
+		return parseLoc(loc)
 	}
 	ref, ok := inputColumns[item]
 	return ref, ok
+}
+
+func parseLoc(loc string) (cellRef, bool) {
+	loc = strings.TrimSpace(loc)
+	if loc == "" {
+		return cellRef{}, false
+	}
+	sheet := "利润表"
+	col := loc
+	if left, right, ok := strings.Cut(loc, "!"); ok {
+		sheet = strings.TrimSpace(left)
+		col = right
+	}
+	col = strings.ToUpper(strings.TrimSpace(col))
+	if sheet == "" || col == "" {
+		return cellRef{}, false
+	}
+	return cellRef{Sheet: sheet, Col: col}, true
 }
 
 func templateByTitle(title string) (tmplChart, bool) {

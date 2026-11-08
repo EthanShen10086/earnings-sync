@@ -38,7 +38,7 @@ func (m *Memory) Upsert(_ context.Context, _ string, ex model.Extraction) (int, 
 	defer m.mu.Unlock()
 	n := 0
 	for _, f := range ex.Facts {
-		ref, ok := refFor(f.LineItem, ex.Columns)
+		ref, ok := locate(f.LineItem, ex)
 		if !ok {
 			continue
 		}

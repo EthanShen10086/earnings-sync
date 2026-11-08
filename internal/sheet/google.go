@@ -78,7 +78,7 @@ func (g *Google) UpsertAll(ctx context.Context, spreadsheetID string, periods []
 			}
 		}
 		for _, f := range ex.Facts {
-			ref, ok := refFor(f.LineItem, ex.Columns)
+			ref, ok := locate(f.LineItem, ex)
 			if !ok {
 				continue
 			}
@@ -165,10 +165,10 @@ func placeRow(resp *sheets.ValueRange, period model.Period) (int, bool) {
 }
 
 func (g *Google) ApplyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec) (int, error) {
-	return g.ApplyCompanyCharts(ctx, spreadsheetID, specs, nil)
+	return g.ApplyCompanyCharts(ctx, spreadsheetID, specs, nil, false)
 }
 
-func (g *Google) ApplyCompanyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec, segments []config.Segment) (int, error) {
+func (g *Google) ApplyCompanyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec, segments []config.Segment, keepFormulas bool) (int, error) {
 	if spreadsheetID == "" {
 		return 0, fmt.Errorf("这家公司还没有 spreadsheet_id。复制 Apple 那份表格模板，把新 id 写进 configs/companies.yaml")
 	}
@@ -188,6 +188,12 @@ func (g *Google) ApplyCompanyCharts(ctx context.Context, spreadsheetID string, s
 				existing[ch.Spec.Title] = true
 			}
 		}
+	}
+	// A company that lists its own yellow cells already has the formulas and charts
+	// the model reads. Painting the Apple template over them would point those charts
+	// at the wrong columns.
+	if keepFormulas {
+		return 0, nil
 	}
 	if err := g.writeAnalysis(ctx, spreadsheetID, segments); err != nil {
 		return 0, err

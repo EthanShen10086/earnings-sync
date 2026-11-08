@@ -57,8 +57,15 @@ type Extraction struct {
 	Period Period
 	Facts  []Fact
 	Unit   string
-	// Columns overrides the default sheet column for a line item. It is not stored.
+	// Columns overrides the default 利润表 column for a segment line. It is not stored.
 	Columns map[string]string `json:"-"`
+	// Cells maps a line item to "表!列" when the company does not use Apple's template.
+	Cells map[string]string `json:"-"`
+	// MappedOnly refuses Apple's default columns for line items that are not mapped.
+	MappedOnly bool `json:"-"`
+	// SegmentTotal is the line item that segment columns should add up to.
+	// Empty means total_revenue.
+	SegmentTotal string `json:"-"`
 }
 
 func (e Extraction) Fact(item string) (Fact, bool) {
