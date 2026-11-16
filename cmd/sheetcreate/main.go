@@ -112,7 +112,7 @@ func createMacro(ctx context.Context, g *sheet.Google, settings config.Settings,
 	if title == "" {
 		title = series.Name
 	}
-	sheetID, err := g.CreateMacroWorkbook(ctx, settings.GoogleCreds, title, settings.GoogleShareWith)
+	sheetID, err := g.CreateMacroWorkbook(ctx, settings.GoogleCreds, title, settings.GoogleShareWith, series.Panels)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if sheetID != "" {

@@ -3,3 +3,47 @@ series:
     name: 中国宏观经济
     title: 2022-2026年中国宏观经济数据汇总
     spreadsheet_id: ""
+    panels:
+      - id: monthly
+        sheet: 宏观
+        layout: rate
+        title: 2022-2026年中国宏观经济数据汇总
+      - id: jan_oct
+        sheet: 历年1-10月
+        layout: level
+        window: "1-10"
+        title: 历年1-10月
+        indicators:
+          - key: fai
+            header: 固定资产投资完成额（万亿元）
+            unit: 万亿元
+          - key: retail
+            header: 社会消费品零售总额（万亿元）
+            unit: 万亿元
+          - key: property_investment
+            header: 房地产开发投资完成额（万亿元）
+            unit: 万亿元
+          - key: property_area
+            header: 商品房销售面积（亿平方米）
+            unit: 亿平方米
+          - key: property_sales
+            header: 商品房销售额（万亿元）
+            unit: 万亿元
+        derived:
+          - yoy_pct
+          - yoy_delta
+          - vs_peak_pct
+          - vs_peak_delta
+        charts:
+          - id: property
+            title: 历年1-10月
+            start_year: 2006
+            indicators: [property_investment, property_area, property_sales]
+            colors: ["#2e7d32", "#212121", "#c62828"]
+            callout: property_sales
+            callout_name: 新建商品房销售收入
+          - id: fai_retail
+            title: 历年1-10月
+            start_year: 2006
+            indicators: [fai, retail]
+            colors: ["#e53935", "#212121"]

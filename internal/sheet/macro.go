@@ -10,19 +10,26 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
-// CreateMacroWorkbook makes the monthly rate sheet and shares it when an address is set.
-func (g *Google) CreateMacroWorkbook(ctx context.Context, credFile, title, shareWith string) (string, error) {
+// CreateMacroWorkbook makes one sheet per panel and shares it when an address is set.
+func (g *Google) CreateMacroWorkbook(ctx context.Context, credFile, title, shareWith string, panels []model.MacroPanel) (string, error) {
 	if title == "" {
 		title = "中国宏观经济数据汇总"
 	}
+	if len(panels) == 0 {
+		panels = []model.MacroPanel{{ID: "monthly", Sheet: macro.SheetName, Layout: "rate", Title: title}}
+	}
+	sheetsSpec := make([]*sheets.Sheet, 0, len(panels))
+	for _, panel := range panels {
+		sheetsSpec = append(sheetsSpec, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: panel.Sheet}})
+	}
 	ss, err := g.svc.Spreadsheets.Create(&sheets.Spreadsheet{
 		Properties: &sheets.SpreadsheetProperties{Title: title},
-		Sheets:     []*sheets.Sheet{{Properties: &sheets.SheetProperties{Title: macro.SheetName}}},
+		Sheets:     sheetsSpec,
 	}).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("创建宏观表格失败：%w。请确认这个 Cloud 项目已启用 Google Drive API", err)
 	}
-	if _, err := g.UpsertMacro(ctx, ss.SpreadsheetId, model.MacroRelease{Title: title}); err != nil {
+	if _, err := g.UpsertMacro(ctx, ss.SpreadsheetId, model.MacroRelease{Title: title, Panels: panels}); err != nil {
 		return ss.SpreadsheetId, fmt.Errorf("表已创建但表头写入失败：%w", err)
 	}
 	if shareWith != "" {
@@ -33,28 +40,78 @@ func (g *Google) CreateMacroWorkbook(ctx context.Context, credFile, title, share
 	return ss.SpreadsheetId, nil
 }
 
-// UpsertMacro writes this month's rates into 宏观 and leaves older months in place.
+// UpsertMacro writes the panels this release belongs to.
+// A rate file does not clear a level sheet, and a level file does not clear the monthly sheet.
 func (g *Google) UpsertMacro(ctx context.Context, spreadsheetID string, rel model.MacroRelease) (int, error) {
 	if spreadsheetID == "" {
 		return 0, fmt.Errorf("这个宏观序列还没有 spreadsheet_id。先运行 go run ./cmd/sheetcreate -series CN")
 	}
-	sh, err := g.ensureSheet(ctx, spreadsheetID, macro.SheetName)
+	panels := rel.Panels
+	if len(panels) == 0 {
+		panels = []model.MacroPanel{{ID: "monthly", Sheet: macro.SheetName, Layout: "rate", Title: rel.Title}}
+	}
+	n := 0
+	for _, panel := range panels {
+		var wrote int
+		var err error
+		switch panel.Layout {
+		case "level":
+			if !wantLevel(rel, panel) {
+				continue
+			}
+			wrote, err = g.upsertLevel(ctx, spreadsheetID, panel, rel.Levels)
+		default:
+			if !wantRate(rel) {
+				continue
+			}
+			wrote, err = g.upsertRate(ctx, spreadsheetID, panel, rel)
+		}
+		if err != nil {
+			return n, err
+		}
+		n += wrote
+	}
+	return n, nil
+}
+
+func wantRate(rel model.MacroRelease) bool {
+	return len(rel.Points) > 0 || len(rel.Levels) == 0
+}
+
+func wantLevel(rel model.MacroRelease, panel model.MacroPanel) bool {
+	if len(rel.Points) == 0 && len(rel.Levels) == 0 {
+		return true
+	}
+	for _, pt := range rel.Levels {
+		if pt.Window == panel.Window {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Google) upsertRate(ctx context.Context, spreadsheetID string, panel model.MacroPanel, rel model.MacroRelease) (int, error) {
+	sh, err := g.ensureSheet(ctx, spreadsheetID, panel.Sheet)
 	if err != nil {
 		return 0, err
 	}
-	resp, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, a1(macro.SheetName, "A1:ZZ400")).
+	resp, err := g.svc.Spreadsheets.Values.Get(spreadsheetID, a1(panel.Sheet, "A1:ZZ400")).
 		ValueRenderOption("UNFORMATTED_VALUE").Context(ctx).Do()
 	if err != nil {
 		return 0, err
 	}
-	grid := macro.Render(rel.Title, resp.Values, rel.Points)
-	if err := g.fitMacroGrid(ctx, spreadsheetID, sh, len(grid.Values), widthOf(grid.Values)); err != nil {
+	title := panel.Title
+	if title == "" {
+		title = rel.Title
+	}
+	grid := macro.Render(title, resp.Values, rel.Points)
+	if err := g.fitMacroGrid(ctx, spreadsheetID, sh, len(grid.Values), widthOf(grid.Values), false); err != nil {
 		return 0, err
 	}
 	_, err = g.svc.Spreadsheets.Values.BatchUpdate(spreadsheetID, &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "RAW",
 		Data: []*sheets.ValueRange{{
-			Range:  a1(macro.SheetName, "A1"),
+			Range:  a1(panel.Sheet, "A1"),
 			Values: grid.Values,
 		}},
 	}).Context(ctx).Do()
@@ -99,7 +156,7 @@ func a1(sheetName, cells string) string {
 	return sheetName + "!" + cells
 }
 
-func (g *Google) fitMacroGrid(ctx context.Context, spreadsheetID string, sh *sheets.Sheet, rows, cols int) error {
+func (g *Google) fitMacroGrid(ctx context.Context, spreadsheetID string, sh *sheets.Sheet, rows, cols int, freezeHeader bool) error {
 	if sh.Properties == nil {
 		return nil
 	}
@@ -112,22 +169,28 @@ func (g *Google) fitMacroGrid(ctx context.Context, spreadsheetID string, sh *she
 		if props.ColumnCount > needCols {
 			needCols = props.ColumnCount
 		}
-		if props.RowCount >= needRows && props.ColumnCount >= needCols && props.FrozenColumnCount >= 1 {
+		if props.RowCount >= needRows && props.ColumnCount >= needCols && props.FrozenColumnCount >= 1 && (!freezeHeader || props.FrozenRowCount >= 1) {
 			return nil
 		}
+	}
+	fields := "gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenColumnCount"
+	propsOut := &sheets.GridProperties{
+		RowCount:          needRows,
+		ColumnCount:       needCols,
+		FrozenColumnCount: 1,
+	}
+	if freezeHeader {
+		propsOut.FrozenRowCount = 1
+		fields += ",gridProperties.frozenRowCount"
 	}
 	_, err := g.svc.Spreadsheets.BatchUpdate(spreadsheetID, &sheets.BatchUpdateSpreadsheetRequest{
 		Requests: []*sheets.Request{{
 			UpdateSheetProperties: &sheets.UpdateSheetPropertiesRequest{
 				Properties: &sheets.SheetProperties{
-					SheetId: sh.Properties.SheetId,
-					GridProperties: &sheets.GridProperties{
-						RowCount:          needRows,
-						ColumnCount:       needCols,
-						FrozenColumnCount: 1,
-					},
+					SheetId:        sh.Properties.SheetId,
+					GridProperties: propsOut,
 				},
-				Fields: "gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenColumnCount",
+				Fields: fields,
 			},
 		}},
 	}).Context(ctx).Do()

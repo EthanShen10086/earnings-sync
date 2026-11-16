@@ -318,3 +318,54 @@ func TestMacroSeriesUsesItsOwnSheet(t *testing.T) {
 		t.Fatalf("notified twice: %d", note.n)
 	}
 }
+
+func TestJanOctWritesLevelSheet(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "cn_jan_oct.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "configs", "macro.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), `spreadsheet_id: ""`, `spreadsheet_id: macro-1`, 1))
+	path := filepath.Join(t.TempDir(), "macro.yaml")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	series, err := config.LoadMacro(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(t.TempDir(), "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	p := &Pipeline{Macro: series, Jobs: store, Sheets: mem, Obs: observe.New()}
+	job, err := p.Ingest(context.Background(), Request{Series: "CN", Filename: "cn_jan_oct.csv", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Cells != 27*5 || len(job.Charts) != 2 {
+		t.Fatalf("job cells %d charts %+v", job.Cells, job.Charts)
+	}
+	var sawValue, sawFormula bool
+	for _, w := range mem.Writes {
+		if w.Sheet != "历年1-10月" {
+			t.Fatalf("wrote %s", w.Sheet)
+		}
+		if w.Value == 36.48 {
+			sawValue = true
+		}
+		if s, ok := w.Value.(string); ok && strings.Contains(s, "ROUND((B28-B27)/B27*100,2)") {
+			sawFormula = true
+		}
+	}
+	if !sawValue || !sawFormula {
+		t.Fatalf("writes %+v", mem.Writes)
+	}
+	if !strings.Contains(job.Charts[0].Title, "减少近9万亿") {
+		t.Fatal(job.Charts[0].Title)
+	}
+}

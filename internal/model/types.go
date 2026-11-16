@@ -113,11 +113,54 @@ type MacroPoint struct {
 	Value     *float64 `json:"value,omitempty"`
 }
 
+// LevelPoint is one level for a year inside a fixed window, such as Jan–Oct.
+// 36.48 means 36.48 of that column's unit, not a percent.
+type LevelPoint struct {
+	Window    string   `json:"window"`
+	Year      int      `json:"year"`
+	Indicator string   `json:"indicator"`
+	Value     *float64 `json:"value,omitempty"`
+}
+
+// MacroColumn is one level column. A later window adds columns here, not in code.
+type MacroColumn struct {
+	Key    string `json:"key" yaml:"key"`
+	Header string `json:"header" yaml:"header"`
+	Unit   string `json:"unit,omitempty" yaml:"unit,omitempty"`
+}
+
+// MacroChart is one column chart drawn from a level panel.
+type MacroChart struct {
+	ID          string   `json:"id" yaml:"id"`
+	Title       string   `json:"title" yaml:"title"`
+	StartYear   int      `json:"start_year,omitempty" yaml:"start_year,omitempty"`
+	Indicators  []string `json:"indicators" yaml:"indicators"`
+	Colors      []string `json:"colors,omitempty" yaml:"colors,omitempty"`
+	Callout     string   `json:"callout,omitempty" yaml:"callout,omitempty"`
+	CalloutName string   `json:"callout_name,omitempty" yaml:"callout_name,omitempty"`
+}
+
+// MacroPanel is one sheet inside a macro workbook.
+// layout "rate" is indicators by month. layout "level" is years by indicator.
+type MacroPanel struct {
+	ID         string        `json:"id" yaml:"id"`
+	Sheet      string        `json:"sheet" yaml:"sheet"`
+	Layout     string        `json:"layout" yaml:"layout"`
+	Title      string        `json:"title,omitempty" yaml:"title,omitempty"`
+	Window     string        `json:"window,omitempty" yaml:"window,omitempty"`
+	Indicators []MacroColumn `json:"indicators,omitempty" yaml:"indicators,omitempty"`
+	Derived    []string      `json:"derived,omitempty" yaml:"derived,omitempty"`
+	Charts     []MacroChart  `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
 // MacroRelease is one macro file after it has been normalized.
+// Panels is the series definition used to place this file. It is not stored on the job.
 type MacroRelease struct {
 	Series string       `json:"series"`
 	Title  string       `json:"title,omitempty"`
 	Points []MacroPoint `json:"points,omitempty"`
+	Levels []LevelPoint `json:"levels,omitempty"`
+	Panels []MacroPanel `json:"-"`
 }
 
 // Job is the durable record of one document.

@@ -55,15 +55,21 @@ func (p *Pipeline) runMacro(ctx context.Context, id string, doc model.Document, 
 	)
 	defer span.End()
 
-	points, warnings, err := macro.Parse(doc.Text)
+	rel, warnings, err := macro.Read(doc.Text, series.Panels)
 	if err != nil {
 		return p.fail(j, err.Error(), span)
 	}
-	rel := model.MacroRelease{Series: series.ID, Title: series.Title, Points: points}
-	j.Warnings = append(warnings, macro.Check(points)...)
+	rel.Series = series.ID
+	rel.Title = series.Title
+	rel.Panels = series.Panels
+	j.Warnings = append(warnings, macro.Check(rel.Points)...)
 	j.Macro = &rel
-	j.Takeaway = macro.Summary(points)
-	latest := macro.LatestPeriod(points)
+	j.Takeaway = macro.Brief(rel)
+	j.Charts = macro.ChartSpecs(rel)
+	latest := macro.LatestPeriod(rel.Points)
+	if latest == "" {
+		latest = levelLatest(rel.Levels)
+	}
 
 	if !req.DryRun {
 		stage := p.stage(ctx, "sheet", func(ctx context.Context) error {
@@ -100,6 +106,7 @@ func (p *Pipeline) runMacro(ctx context.Context, id string, doc model.Document, 
 				Kind:     model.KindMacro,
 				Takeaway: j.Takeaway,
 				Warnings: j.Warnings,
+				Charts:   j.Charts,
 				SheetURL: j.SheetURL,
 			})
 			if err != nil {
@@ -120,4 +127,19 @@ func (p *Pipeline) runMacro(ctx context.Context, id string, doc model.Document, 
 	}
 	p.Obs.JobDuration.WithLabelValues(series.ID, j.Status, boolLabel(req.DryRun)).Observe(time.Since(start).Seconds())
 	return j, nil
+}
+
+func levelLatest(points []model.LevelPoint) string {
+	year := 0
+	window := ""
+	for _, pt := range points {
+		if pt.Year >= year {
+			year = pt.Year
+			window = pt.Window
+		}
+	}
+	if year == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d年%s", year, macro.WindowLabel(window))
 }

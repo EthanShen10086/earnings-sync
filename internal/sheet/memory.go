@@ -76,11 +76,53 @@ func (m *Memory) UpsertMacro(_ context.Context, _ string, rel model.MacroRelease
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	grid := macro.Render(rel.Title, nil, rel.Points)
-	for _, cell := range grid.Cells {
-		m.Writes = append(m.Writes, Write{Sheet: macro.SheetName, A1: macro.A1(cell.Col, cell.Row), Value: cell.Value})
+	n := 0
+	panels := rel.Panels
+	if len(panels) == 0 {
+		panels = []model.MacroPanel{{ID: "monthly", Sheet: macro.SheetName, Layout: "rate", Title: rel.Title}}
 	}
-	return len(grid.Cells), nil
+	for _, panel := range panels {
+		switch panel.Layout {
+		case "level":
+			if !wantLevel(rel, panel) {
+				continue
+			}
+			grid := macro.RenderLevel(panel, nil, rel.Levels)
+			for _, cell := range grid.Inputs {
+				m.Writes = append(m.Writes, Write{Sheet: panel.Sheet, A1: macro.A1(cell.Col, cell.Row), Value: cell.Value})
+			}
+			for _, mark := range grid.Marks {
+				if mark.Kind != "yoy_pct" && mark.Kind != "vs_peak_pct" && mark.Kind != "yoy_delta" && mark.Kind != "vs_peak_delta" {
+					continue
+				}
+				if mark.Row < len(grid.Values) && len(grid.Values[mark.Row]) > 1 {
+					m.Writes = append(m.Writes, Write{Sheet: panel.Sheet, A1: macro.A1(1, mark.Row), Value: grid.Values[mark.Row][1]})
+				}
+			}
+			for _, ch := range grid.Charts {
+				m.Charts = append(m.Charts, model.ChartSpec{Title: ch.Title, ChartType: model.ChartColumn, Sheet: panel.Sheet, Source: model.SourceRule, Reason: "历年同期水平"})
+			}
+			n += len(grid.Inputs)
+		default:
+			if !wantRate(rel) {
+				continue
+			}
+			title := panel.Title
+			if title == "" {
+				title = rel.Title
+			}
+			grid := macro.Render(title, nil, rel.Points)
+			name := panel.Sheet
+			if name == "" {
+				name = macro.SheetName
+			}
+			for _, cell := range grid.Cells {
+				m.Writes = append(m.Writes, Write{Sheet: name, A1: macro.A1(cell.Col, cell.Row), Value: cell.Value})
+			}
+			n += len(grid.Cells)
+		}
+	}
+	return n, nil
 }
 
 func (m *Memory) ApplyCharts(_ context.Context, _ string, specs []model.ChartSpec) (int, error) {
