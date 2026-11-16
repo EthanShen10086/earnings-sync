@@ -1,0 +1,16 @@
+period,basis,indicator,value
+202312,ytd,gdp,5.2
+202512,ytd,gdp,5.0
+202610,ytd,gdp,4.6
+202610,ytd,retail,1.0
+202610,ytd,fai,-8.1
+202610,ytd,fai_ex_property,-5.1
+202610,ytd,private_ex_property,-7.8
+202610,yoy,gdp,4.5
+202610,yoy,pmi,49.3
+202610,yoy,cpi,0.7
+202610,yoy,ppi,5.7
+202610,yoy,cpi_ppi,-5.0
+202610,mom,retail,0.02
+202610,mom,fai,-2.93
+202610,mom,industrial,0.21

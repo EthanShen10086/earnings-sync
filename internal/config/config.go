@@ -272,6 +272,7 @@ func replaceSpreadsheetID(src, ticker, id string) (string, error) {
 // Settings comes from the environment so secrets stay out of the repo.
 type Settings struct {
 	CompaniesFile   string
+	MacroFile       string
 	JobStorePath    string
 	ModelAPIKey     string
 	ModelBaseURL    string
@@ -288,6 +289,7 @@ func LoadSettings() Settings {
 	LoadDotEnv(".env")
 	return Settings{
 		CompaniesFile:   env("COMPANIES_FILE", "configs/companies.yaml"),
+		MacroFile:       env("MACRO_FILE", "configs/macro.yaml"),
 		JobStorePath:    env("JOB_STORE_PATH", "data/jobs.json"),
 		ModelAPIKey:     os.Getenv("DEEPSEEK_API_KEY"),
 		ModelBaseURL:    env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),

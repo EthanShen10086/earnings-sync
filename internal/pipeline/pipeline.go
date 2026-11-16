@@ -24,9 +24,10 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// Request is one manual ingest.
+// Request is one manual ingest. Series selects a macro table; Ticker selects a company.
 type Request struct {
 	Ticker   string
+	Series   string
 	URL      string
 	Filename string
 	Body     []byte
@@ -38,6 +39,7 @@ type Request struct {
 // Pipeline runs acquire, extract, reconcile, sheet, charts, takeaway, and notify.
 type Pipeline struct {
 	Companies    *config.Registry
+	Macro        *config.MacroRegistry
 	Jobs         *job.Store
 	Extractor    extract.Extractor
 	Sheets       sheet.Store
@@ -54,6 +56,23 @@ type Pipeline struct {
 
 func (p *Pipeline) Ingest(ctx context.Context, req Request) (*model.Job, error) {
 	req.Ticker = strings.ToUpper(strings.TrimSpace(req.Ticker))
+	req.Series = strings.ToUpper(strings.TrimSpace(req.Series))
+	if req.Series != "" {
+		if p.Macro == nil {
+			return nil, fmt.Errorf("没有这个宏观序列 %s", req.Series)
+		}
+		if _, ok := p.Macro.Get(req.Series); !ok {
+			return nil, fmt.Errorf("没有这个宏观序列 %s", req.Series)
+		}
+		return p.ingestMacro(ctx, req.Series, req)
+	}
+	if p.Companies != nil && p.Macro != nil {
+		if _, ok := p.Companies.Get(req.Ticker); !ok {
+			if _, ok := p.Macro.Get(req.Ticker); ok {
+				return p.ingestMacro(ctx, req.Ticker, req)
+			}
+		}
+	}
 	company, ok := p.Companies.Get(req.Ticker)
 	if !ok {
 		return nil, fmt.Errorf("unknown ticker %s", req.Ticker)

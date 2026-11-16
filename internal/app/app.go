@@ -93,6 +93,10 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	macroReg, err := config.LoadMacro(settings.MacroFile)
+	if err != nil {
+		return nil, nil, err
+	}
 	store, err := job.Open(settings.JobStorePath)
 	if err != nil {
 		return nil, nil, err
@@ -124,6 +128,7 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 	}
 	return &pipeline.Pipeline{
 		Companies:    reg,
+		Macro:        macroReg,
 		Jobs:         store,
 		Extractor:    extract.Extractor{Model: model},
 		Sheets:       sheets,

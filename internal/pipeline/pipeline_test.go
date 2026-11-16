@@ -251,3 +251,121 @@ func TestFilingParseWritesBalanceSheet(t *testing.T) {
 		t.Fatalf("writes %+v", mem.Writes)
 	}
 }
+
+func TestMacroSeriesUsesItsOwnSheet(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "cn_macro.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	companies, err := config.Load(filepath.Join("..", "..", "configs", "companies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "macro.yaml")
+	if err := os.WriteFile(path, []byte("series:\n  - id: CN\n    name: 中国宏观经济\n    title: 2022-2026年中国宏观经济数据汇总\n    spreadsheet_id: macro-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	series, err := config.LoadMacro(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(t.TempDir(), "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	note := &capture{}
+	p := &Pipeline{
+		Companies: companies,
+		Macro:     series,
+		Jobs:      store,
+		Sheets:    mem,
+		Notifier:  note,
+		Obs:       observe.New(),
+	}
+	req := Request{Series: "cn", Filename: "cn_macro.csv", Body: body, DryRun: true}
+	dry, err := p.Ingest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dry.Kind != "macro" || dry.Macro == nil || len(dry.Takeaway) == 0 || len(mem.Writes) != 0 || note.n != 0 {
+		t.Fatalf("dry %+v writes %d notes %d", dry, len(mem.Writes), note.n)
+	}
+	again, err := p.Ingest(context.Background(), req)
+	if err != nil || again.ID != dry.ID {
+		t.Fatalf("idempotent %v %+v", err, again)
+	}
+	live, err := p.Ingest(context.Background(), Request{Ticker: "CN", Filename: "cn_macro.csv", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Cells != 15 || note.n != 1 || live.SheetURL == "" {
+		t.Fatalf("live %+v notes %d", live, note.n)
+	}
+	found := false
+	for _, w := range mem.Writes {
+		if w.Sheet == "宏观" && w.A1 == "D3" && w.Value == 4.6 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("writes %+v", mem.Writes)
+	}
+	if _, err := p.Ingest(context.Background(), Request{Ticker: "CN", Filename: "cn_macro.csv", Body: body}); err != nil {
+		t.Fatal(err)
+	}
+	if note.n != 1 {
+		t.Fatalf("notified twice: %d", note.n)
+	}
+}
+
+func TestJanOctWritesLevelSheet(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "cn_jan_oct.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "configs", "macro.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), `spreadsheet_id: ""`, `spreadsheet_id: macro-1`, 1))
+	path := filepath.Join(t.TempDir(), "macro.yaml")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	series, err := config.LoadMacro(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(t.TempDir(), "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	p := &Pipeline{Macro: series, Jobs: store, Sheets: mem, Obs: observe.New()}
+	job, err := p.Ingest(context.Background(), Request{Series: "CN", Filename: "cn_jan_oct.csv", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Cells != 27*5 || len(job.Charts) != 2 {
+		t.Fatalf("job cells %d charts %+v", job.Cells, job.Charts)
+	}
+	var sawValue, sawFormula bool
+	for _, w := range mem.Writes {
+		if w.Sheet != "历年1-10月" {
+			t.Fatalf("wrote %s", w.Sheet)
+		}
+		if w.Value == 36.48 {
+			sawValue = true
+		}
+		if s, ok := w.Value.(string); ok && strings.Contains(s, "ROUND((B28-B27)/B27*100,2)") {
+			sawFormula = true
+		}
+	}
+	if !sawValue || !sawFormula {
+		t.Fatalf("writes %+v", mem.Writes)
+	}
+	if !strings.Contains(job.Charts[0].Title, "减少近9万亿") {
+		t.Fatal(job.Charts[0].Title)
+	}
+}

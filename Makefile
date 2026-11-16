@@ -1,7 +1,24 @@
-.PHONY: test run tidy doctor live
+.PHONY: test fmt fmt-check run tidy doctor live hooks
 
 test:
 	go test ./...
+
+fmt:
+	gofmt -w $$(git ls-files '*.go')
+
+fmt-check:
+	@unformatted=$$(gofmt -l $$(git ls-files '*.go')); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt would change:"; \
+		printf '%s\n' "$$unformatted"; \
+		exit 1; \
+	fi
+
+hooks:
+	cp githooks/deny-master .git/hooks/pre-commit
+	cp githooks/deny-master .git/hooks/pre-merge-commit
+	cp githooks/deny-master .git/hooks/pre-push
+	chmod +x .git/hooks/pre-commit .git/hooks/pre-merge-commit .git/hooks/pre-push
 
 tidy:
 	go mod tidy
