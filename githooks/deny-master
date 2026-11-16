@@ -1,0 +1,24 @@
+#!/bin/sh
+# Block local commits, merges, and pushes that change master directly.
+# GitHub branch protection is the gate that cannot be skipped with --no-verify.
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+if [ "$branch" = "master" ]; then
+	echo "拒绝直接修改 master。请开功能分支，等格式化和测试通过后再合入。" >&2
+	exit 1
+fi
+
+case "$(basename "$0")" in
+pre-push)
+	while read -r local_ref local_sha remote_ref remote_sha; do
+		case "$remote_ref" in
+		refs/heads/master)
+			echo "拒绝直接推送 master。请走 Pull Request，等 fmt 和 test 通过后再合入。" >&2
+			exit 1
+			;;
+		esac
+	done
+	;;
+esac
+
+exit 0
