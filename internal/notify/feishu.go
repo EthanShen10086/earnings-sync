@@ -21,6 +21,7 @@ import (
 type Message struct {
 	Ticker   string
 	Period   string
+	Kind     string
 	Takeaway []string
 	Warnings []string
 	Charts   []model.ChartSpec
@@ -37,9 +38,13 @@ func (m Message) Text() string {
 	for _, line := range m.Takeaway {
 		b.WriteString("- " + line + "\n")
 	}
-	b.WriteString("勾稽\n")
+	check, empty := "勾稽", "未发现勾稽差异"
+	if m.Kind == model.KindMacro {
+		check, empty = "校验", "未发现口径问题"
+	}
+	b.WriteString(check + "\n")
 	if len(m.Warnings) == 0 {
-		b.WriteString("- 未发现勾稽差异\n")
+		b.WriteString("- " + empty + "\n")
 	}
 	for _, line := range m.Warnings {
 		b.WriteString("- " + line + "\n")

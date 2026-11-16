@@ -13,8 +13,9 @@ import (
 )
 
 func main() {
-	title := flag.String("title", "", "新表格标题。空着时用公司名")
+	title := flag.String("title", "", "新表格标题。空着时用公司名或宏观序列标题")
 	ticker := flag.String("ticker", "", "公司代码。给出后用它的分部做表头，并把 spreadsheet id 写回配置")
+	series := flag.String("series", "", "宏观序列，例如 CN。给出后建「宏观」表，并把 spreadsheet id 写回配置")
 	flag.Parse()
 	settings := config.LoadSettings()
 	if settings.GoogleCreds == "" {
@@ -40,6 +41,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if *series != "" && *ticker != "" {
+		fmt.Fprintln(os.Stderr, "ticker 和 series 只能填一个")
+		os.Exit(1)
+	}
+	if *series != "" {
+		createMacro(ctx, g, settings, *series, *title)
+		return
 	}
 	var segments []config.Segment
 	reg, err := config.Load(settings.CompaniesFile)
@@ -84,4 +93,38 @@ func main() {
 		fmt.Println("已创建。打开后确认你能编辑，再把 spreadsheet id 写进 configs/companies.yaml。")
 	}
 	fmt.Println("https://docs.google.com/spreadsheets/d/" + id)
+}
+
+func createMacro(ctx context.Context, g *sheet.Google, settings config.Settings, id, title string) {
+	reg, err := config.LoadMacro(settings.MacroFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	series, ok := reg.Get(id)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "配置里没有宏观序列 %s。先写进 configs/macro.yaml。\n", strings.ToUpper(id))
+		os.Exit(1)
+	}
+	if title == "" {
+		title = series.Title
+	}
+	if title == "" {
+		title = series.Name
+	}
+	sheetID, err := g.CreateMacroWorkbook(ctx, settings.GoogleCreds, title, settings.GoogleShareWith)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if sheetID != "" {
+			fmt.Println("https://docs.google.com/spreadsheets/d/" + sheetID)
+		}
+		os.Exit(1)
+	}
+	if err := reg.SetSpreadsheet(series.ID, sheetID); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Println("https://docs.google.com/spreadsheets/d/" + sheetID)
+		os.Exit(1)
+	}
+	fmt.Printf("已创建宏观表，并写回 %s 的 spreadsheet_id。\n", series.ID)
+	fmt.Println("https://docs.google.com/spreadsheets/d/" + sheetID)
 }

@@ -7,6 +7,9 @@ const (
 	StatusSucceeded = "succeeded"
 	StatusFailed    = "failed"
 
+	KindEquity = "equity"
+	KindMacro  = "macro"
+
 	StatementIncome   = "income"
 	StatementBalance  = "balance"
 	StatementCashflow = "cashflow"
@@ -101,28 +104,46 @@ type ChartSpec struct {
 	Sheet     string `json:"sheet,omitempty"`
 }
 
+// MacroPoint is one indicator at one month. Value is the published number:
+// 4.6 means 4.6%, and PMI stays a level such as 49.3.
+type MacroPoint struct {
+	Period    string   `json:"period"`
+	Basis     string   `json:"basis"`
+	Indicator string   `json:"indicator"`
+	Value     *float64 `json:"value,omitempty"`
+}
+
+// MacroRelease is one macro file after it has been normalized.
+type MacroRelease struct {
+	Series string       `json:"series"`
+	Title  string       `json:"title,omitempty"`
+	Points []MacroPoint `json:"points,omitempty"`
+}
+
 // Job is the durable record of one document.
 type Job struct {
-	ID         string      `json:"id"`
-	Ticker     string      `json:"ticker"`
-	Status     string      `json:"status"`
-	DocHash    string      `json:"doc_hash"`
-	Locator    string      `json:"locator,omitempty"`
-	Source     string      `json:"source,omitempty"`
-	DryRun     bool        `json:"dry_run"`
-	Stages     []Stage     `json:"stages,omitempty"`
-	Actions    []string    `json:"actions,omitempty"`
-	Extraction *Extraction `json:"extraction,omitempty"`
-	Warnings   []string    `json:"warnings,omitempty"`
-	Takeaway   []string    `json:"takeaway,omitempty"`
-	Charts     []ChartSpec `json:"charts,omitempty"`
-	SheetURL   string      `json:"sheet_url,omitempty"`
-	Notified   bool        `json:"notified"`
-	Cells      int         `json:"cells_written,omitempty"`
-	Tokens     int         `json:"model_tokens,omitempty"`
-	Error      string      `json:"error,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	ID         string        `json:"id"`
+	Ticker     string        `json:"ticker"`
+	Kind       string        `json:"kind,omitempty"`
+	Status     string        `json:"status"`
+	DocHash    string        `json:"doc_hash"`
+	Locator    string        `json:"locator,omitempty"`
+	Source     string        `json:"source,omitempty"`
+	DryRun     bool          `json:"dry_run"`
+	Stages     []Stage       `json:"stages,omitempty"`
+	Actions    []string      `json:"actions,omitempty"`
+	Extraction *Extraction   `json:"extraction,omitempty"`
+	Macro      *MacroRelease `json:"macro,omitempty"`
+	Warnings   []string      `json:"warnings,omitempty"`
+	Takeaway   []string      `json:"takeaway,omitempty"`
+	Charts     []ChartSpec   `json:"charts,omitempty"`
+	SheetURL   string        `json:"sheet_url,omitempty"`
+	Notified   bool          `json:"notified"`
+	Cells      int           `json:"cells_written,omitempty"`
+	Tokens     int           `json:"model_tokens,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
 // Document is the bytes acquired from a URL, file, or filing.

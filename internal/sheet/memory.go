@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/EthanShen10086/earnings-sync/internal/macro"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 )
 
@@ -19,6 +20,7 @@ type Store interface {
 	Upsert(ctx context.Context, spreadsheetID string, ex model.Extraction) (int, error)
 	UpsertAll(ctx context.Context, spreadsheetID string, periods []model.Extraction) (int, error)
 	ApplyCharts(ctx context.Context, spreadsheetID string, specs []model.ChartSpec) (int, error)
+	UpsertMacro(ctx context.Context, spreadsheetID string, rel model.MacroRelease) (int, error)
 }
 
 // Memory records writes for tests.
@@ -66,6 +68,19 @@ func (m *Memory) UpsertAll(ctx context.Context, spreadsheetID string, periods []
 		}
 	}
 	return n, nil
+}
+
+func (m *Memory) UpsertMacro(_ context.Context, _ string, rel model.MacroRelease) (int, error) {
+	if m.Err != nil {
+		return 0, m.Err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	grid := macro.Render(rel.Title, nil, rel.Points)
+	for _, cell := range grid.Cells {
+		m.Writes = append(m.Writes, Write{Sheet: macro.SheetName, A1: macro.A1(cell.Col, cell.Row), Value: cell.Value})
+	}
+	return len(grid.Cells), nil
 }
 
 func (m *Memory) ApplyCharts(_ context.Context, _ string, specs []model.ChartSpec) (int, error) {

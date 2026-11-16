@@ -116,6 +116,7 @@ func readIngest(r *http.Request) (pipeline.Request, error) {
 		}
 		req := pipeline.Request{
 			Ticker: r.FormValue("ticker"),
+			Series: r.FormValue("series"),
 			URL:    r.FormValue("url"),
 			DryRun: r.FormValue("dry_run") == "true" || r.FormValue("dry_run") == "1",
 			Force:  r.FormValue("force") == "true",
@@ -133,6 +134,7 @@ func readIngest(r *http.Request) (pipeline.Request, error) {
 	}
 	var body struct {
 		Ticker string `json:"ticker"`
+		Series string `json:"series"`
 		URL    string `json:"url"`
 		DryRun bool   `json:"dry_run"`
 		Force  bool   `json:"force"`
@@ -140,7 +142,7 @@ func readIngest(r *http.Request) (pipeline.Request, error) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		return pipeline.Request{}, err
 	}
-	return pipeline.Request{Ticker: body.Ticker, URL: body.URL, DryRun: body.DryRun, Force: body.Force}, nil
+	return pipeline.Request{Ticker: body.Ticker, Series: body.Series, URL: body.URL, DryRun: body.DryRun, Force: body.Force}, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
