@@ -122,3 +122,42 @@ func TestParseWriteMode(t *testing.T) {
 		t.Fatal(ParseFailPolicy("best-effort"))
 	}
 }
+
+func TestDualConcurrentUpsertsIdempotent(t *testing.T) {
+	sheets, pg := &Memory{}, &Memory{}
+	d := &Dual{Sheets: sheets, PG: pg, Mode: ModeDual, Fail: FailPartial}
+	ctx := context.Background()
+	const n = 32
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			ex := sampleExtraction()
+			// Same idempotency keys every time — concurrent re-upsert must not duplicate.
+			_, err := d.Upsert(ctx, "sheet-1", ex)
+			errCh <- err
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+	sRows, _ := sheets.ListFacts(ctx, "AAPL")
+	pRows, _ := pg.ListFacts(ctx, "AAPL")
+	if len(sRows) != 2 || len(pRows) != 2 {
+		t.Fatalf("want 2 facts each side after concurrent idempotent upserts; sheets=%d pg=%d", len(sRows), len(pRows))
+	}
+}
+
+func TestDualPartialParallelStillWritesSibling(t *testing.T) {
+	boom := errors.New("boom")
+	a, b := &Memory{Err: boom}, &Memory{}
+	d := &Dual{Sheets: a, PG: b, Mode: ModeDual, Fail: FailPartial}
+	_, err := d.Upsert(context.Background(), "sheet-1", sampleExtraction())
+	if err == nil {
+		t.Fatal("expected aggregate error")
+	}
+	if len(b.Facts) == 0 {
+		t.Fatal("pg should still receive writes under fail-partial (parallel)")
+	}
+}
