@@ -53,10 +53,18 @@ func main() {
 	flag.Var(&inputs, "input", "流程输入，可重复，形如 key=value（value 支持 true/false/数字/JSON）")
 	flag.Parse()
 
-	fileStore, err := orchestrator.OpenFileRunStore(*runsPath, *eventsPath)
+	dbURL := os.Getenv("DATABASE_URL")
+	migDir := os.Getenv("MIGRATIONS_DIR")
+	runReg, eventSink, runCleanup, err := orchestrator.OpenPersistentRuns(context.Background(), orchestrator.PersistOpts{
+		RunsPath:      *runsPath,
+		EventsPath:    *eventsPath,
+		DatabaseURL:   dbURL,
+		MigrationsDir: migDir,
+	})
 	if err != nil {
 		fatal(err)
 	}
+	defer func() { _ = runCleanup() }()
 
 	var note notify.Sender
 	if *notifyCapture {
@@ -69,8 +77,8 @@ func main() {
 		Notifier:      note,
 		// Opt-in dual/pg for CLI when env is set; tests leave these empty → Memory only.
 		StorageMode:   os.Getenv("STORAGE_MODE"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		MigrationsDir: os.Getenv("MIGRATIONS_DIR"),
+		DatabaseURL:   dbURL,
+		MigrationsDir: migDir,
 	})
 	if err != nil {
 		fatal(err)
@@ -118,7 +126,7 @@ func main() {
 
 	obs := observe.New()
 	observer := &orchestrator.MetricsObserver{
-		Inner: orchestrator.NewSlogObserver(fileStore),
+		Inner: orchestrator.NewSlogObserver(eventSink),
 		Rec:   obs,
 	}
 
@@ -126,7 +134,7 @@ func main() {
 	eng := &orchestrator.Engine{
 		Registry:       reg,
 		Events:         events,
-		Runs:           fileStore.Memory(),
+		Runs:           runReg,
 		Observer:       observer,
 		DefaultTimeout: *timeout,
 	}

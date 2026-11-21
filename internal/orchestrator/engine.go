@@ -17,7 +17,8 @@ type Engine struct {
 	Registry Registry
 	Events   chan Event // optional; if nil, events are discarded
 	// Runs remembers finished/in-flight runs by RunID and ClientRequestID (hub-style idempotency).
-	Runs *RunStore
+	// Use memory, FileRunStore.Memory(), or PGRunStore when DATABASE_URL is set.
+	Runs RunRegistry
 	// Observer emits structured logs, product events, and metrics (optional).
 	Observer Observer
 	// DefaultTimeout bounds the whole run when the caller context has no deadline.

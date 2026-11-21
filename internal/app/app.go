@@ -102,10 +102,6 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 	if err != nil {
 		return nil, nil, noop, err
 	}
-	store, err := job.Open(settings.JobStorePath)
-	if err != nil {
-		return nil, nil, noop, err
-	}
 	obs := observe.New()
 	var model extract.Provider
 	var chatter agent.Chatter
@@ -122,6 +118,25 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 	sheets, cleanup, err := BuildStore(context.Background(), settings)
 	if err != nil {
 		return nil, nil, noop, err
+	}
+	// Jobs follow DATABASE_URL when set (cross-process idempotency); else jobs.json.
+	store, jobCleanup, err := job.OpenAuto(context.Background(), job.OpenOptions{
+		Path:          settings.JobStorePath,
+		DatabaseURL:   settings.DatabaseURL,
+		MigrationsDir: settings.MigrationsDir,
+	})
+	if err != nil {
+		_ = cleanup()
+		return nil, nil, noop, err
+	}
+	prevCleanup := cleanup
+	cleanup = func() error {
+		err1 := jobCleanup()
+		err2 := prevCleanup()
+		if err1 != nil {
+			return err1
+		}
+		return err2
 	}
 	var sender notify.Sender
 	if settings.FeishuWebhook != "" {

@@ -8,7 +8,7 @@ pg-up:
 
 pg-test:
 	@test -n "$$DATABASE_URL" || (echo 'set DATABASE_URL first'; exit 1)
-	go test ./internal/store/postgres ./internal/sheet -count=1
+	go test ./internal/store/postgres ./internal/sheet ./internal/job ./internal/orchestrator -count=1
 
 web:
 	cd apps/web && python3 -m http.server 5173 --bind 127.0.0.1

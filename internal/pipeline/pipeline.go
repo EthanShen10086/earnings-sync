@@ -40,7 +40,7 @@ type Request struct {
 type Pipeline struct {
 	Companies    *config.Registry
 	Macro        *config.MacroRegistry
-	Jobs         *job.Store
+	Jobs         job.Store
 	Extractor    extract.Extractor
 	Sheets       sheet.Store
 	Notifier     notify.Sender

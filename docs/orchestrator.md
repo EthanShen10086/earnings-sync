@@ -8,11 +8,11 @@
 
 ```
 cmd/orchestrate
-    │  解析 flags / 健康检查 / 打开 FileRunStore
+    │  解析 flags / 健康检查 / OpenPersistentRuns
     ▼
 Engine  ── Observer（JSON 日志 + product events + Prometheus）
     │
-    ├─ RunStore / FileRunStore   运行态 + 幂等键 + 落盘
+    ├─ RunRegistry（Memory / FileRunStore / PGRunStore）  运行态 + 幂等键
     ├─ Registry.Tools            tool 节点
     ├─ Registry.Chatter          agent 节点（DeepSeek 或 Mock）
     └─ FlowDefinition (YAML DAG)
@@ -24,7 +24,7 @@ Engine  ── Observer（JSON 日志 + product events + Prometheus）
 | 定义 | YAML DAG、输入输出声明 | `configs/flows/*.flow.yaml`, `load.go` |
 | 调度 | ready-queue、并发、跳过/失败策略 | `engine.go`, `graph.go` |
 | 执行 | tool / agent / condition runner | `runners.go`, `builtins.go`, `pipeline_bridge.go` |
-| 运行态 | RunState、幂等、落盘查询 | `runstore.go`, `filestore.go` |
+| 运行态 | RunState、幂等、文件或 PG | `runstore.go`, `filestore.go`, `pgstore.go`, `persist.go` |
 | 可观测 | request/trace id、事件、指标 | `observer.go`, `context.go`, `internal/observe` |
 | 稳定性 | 超时、重试、健康检查 | `engine.go` DefaultTimeout、`health.go` |
 
@@ -58,6 +58,7 @@ go test ./internal/orchestrator -count=1
 - dry-run 退出码 0，stdout 中 `status=succeeded`，`ingest.dry_run=true`
 - live 写入 `orchestrator-e2e-writes.json` 含 cells；`orchestrator-events.json` 含 `flow.start` / `flow.success`
 - 同一 `-client-request-id` 再跑一次，复用同一 `run_id`
+- 设置 `DATABASE_URL` 时，runs/events/jobs 写入 PostgreSQL，跨进程仍可按 `client_request_id` / `doc_hash` 恢复（见 [jobs-runs-pg.md](./jobs-runs-pg.md)）
 
 接真实 DeepSeek：`-mock-model=false` 并设置 `DEEPSEEK_API_KEY`。
 
