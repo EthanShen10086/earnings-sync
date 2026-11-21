@@ -9,10 +9,12 @@ import (
 
 // Limiter is a simple token-bucket rate limiter keyed by client IP.
 type Limiter struct {
-	rps     float64
-	burst   int
-	mu      sync.Mutex
-	buckets map[string]*bucket
+	rps      float64
+	burst    int
+	mu       sync.Mutex
+	buckets  map[string]*bucket
+	allowed  int64
+	rejected int64
 }
 
 type bucket struct {
@@ -39,6 +41,7 @@ func (l *Limiter) Allow(key string) bool {
 	b, ok := l.buckets[key]
 	if !ok {
 		l.buckets[key] = &bucket{tokens: float64(l.burst) - 1, last: now}
+		l.allowed++
 		return true
 	}
 	elapsed := now.Sub(b.last).Seconds()
@@ -48,10 +51,28 @@ func (l *Limiter) Allow(key string) bool {
 	}
 	b.last = now
 	if b.tokens < 1 {
+		l.rejected++
 		return false
 	}
 	b.tokens--
+	l.allowed++
 	return true
+}
+
+// Stats returns cumulative allow/reject counts for observability.
+func (l *Limiter) Stats() map[string]any {
+	if l == nil {
+		return map[string]any{"enabled": false}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return map[string]any{
+		"enabled":  l.rps > 0,
+		"rps":      l.rps,
+		"burst":    l.burst,
+		"allowed":  l.allowed,
+		"rejected": l.rejected,
+	}
 }
 
 // Middleware rejects excess traffic with 429. Disabled when rps <= 0.

@@ -77,7 +77,7 @@ func Open(ctx context.Context, settings config.Settings) (*Stack, error) {
 		Enabled: settings.RateLimitRPS > 0,
 		RPS:     settings.RateLimitRPS,
 		Burst:   settings.RateLimitBurst,
-		Detail:  "skeleton only — place behind real API gateway / ingress later",
+		Detail:  "in-process token-bucket; counts allowed/rejected (edge gateway still optional)",
 	}
 	if !gs.Enabled {
 		gs.Detail = "RATE_LIMIT_RPS unset or 0 — pass-through"

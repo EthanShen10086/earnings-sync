@@ -2,7 +2,7 @@
   const I18N = {
     zh: {
       title: "earnings-sync",
-      subtitle: "只读事实表骨架：排序 / 筛选 / 导出占位；鉴权默认 bypass，无密钥可演示。",
+      subtitle: "只读事实表：排序 / 筛选 / CSV；鉴权默认 bypass，无密钥可演示（见 docs/stub-credentials.md）。",
       ticker: "Ticker",
       api: "API Base",
       filter: "筛选科目",
@@ -31,7 +31,7 @@
     },
     en: {
       title: "earnings-sync",
-      subtitle: "Read-only facts skeleton: sort / filter / export stub; AUTH_MODE=bypass needs no secrets.",
+      subtitle: "Read-only facts: sort / filter / CSV; AUTH_MODE=bypass needs no secrets (see docs/stub-credentials.md).",
       ticker: "Ticker",
       api: "API Base",
       filter: "Filter line item",

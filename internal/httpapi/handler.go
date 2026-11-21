@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/EthanShen10086/earnings-sync/internal/auth"
+	"github.com/EthanShen10086/earnings-sync/internal/features"
 	"github.com/EthanShen10086/earnings-sync/internal/infra"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
@@ -24,7 +26,8 @@ type API struct {
 	Facts  sheet.Reader // optional; Postgres or Memory readback for apps/web
 	Auth   auth.Config
 	Alerts *observe.AlertBoard
-	Infra  *infra.Stack // optional data-plane adapters (cache/mq/objects/audit/search)
+	Infra  *infra.Stack    // data-plane adapters (cache/mq/objects/audit/search)
+	Feat   features.Bundle // feature flags; gates platform side-effects
 }
 
 func (a API) Handler() http.Handler {
@@ -35,10 +38,16 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/auth/me", a.authMe)
 	mux.HandleFunc("GET /v1/auth/providers", a.authProviders)
 	mux.HandleFunc("GET /v1/ops/alerts", a.listAlerts)
+	mux.HandleFunc("GET /v1/platform/status", a.platformStatus)
+	mux.HandleFunc("GET /v1/search", a.searchHandler)
+	mux.HandleFunc("GET /v1/audit", a.auditHandler)
 	mux.HandleFunc("OPTIONS /v1/ops/alerts", optionsOK)
 	mux.HandleFunc("OPTIONS /v1/auth/me", optionsOK)
 	mux.HandleFunc("OPTIONS /v1/auth/providers", optionsOK)
 	mux.HandleFunc("OPTIONS /v1/meta", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/platform/status", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/search", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/audit", optionsOK)
 	mux.HandleFunc("POST /v1/ingest", a.ingest)
 	mux.HandleFunc("POST /v1/watch", a.watch)
 	mux.HandleFunc("POST /v1/charts/recommend", a.recommend)
@@ -96,7 +105,11 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 			"auth_oidc_stub":  cfg.Mode == auth.ModeOIDC,
 			"ops_alerts_stub": true,
 			"otel_optional":   true,
+			"search":          a.featActive("search"),
+			"audit":           a.featActive("audit"),
+			"platform_status": true,
 		},
+		"features": a.Feat.Report,
 	})
 }
 
@@ -137,7 +150,14 @@ func (a API) listFacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errStringError("fact reader unavailable (set STORAGE_MODE=pg-only|dual with DATABASE_URL, or use Memory store)"))
 		return
 	}
-	rows, err := reader.ListFacts(r.Context(), r.URL.Query().Get("ticker"))
+	ticker := r.URL.Query().Get("ticker")
+	cacheHit := false
+	if a.Infra != nil && a.featActive("redis") {
+		if _, ok, err := a.Infra.Cache.Get(r.Context(), "facts:"+strings.ToUpper(strings.TrimSpace(ticker))); err == nil && ok {
+			cacheHit = true
+		}
+	}
+	rows, err := reader.ListFacts(r.Context(), ticker)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
@@ -145,12 +165,17 @@ func (a API) listFacts(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []sheet.FactRow{}
 	}
+	if a.Infra != nil && a.featActive("redis") && ticker != "" {
+		payload, _ := json.Marshal(map[string]any{"count": len(rows), "at": time.Now().UTC()})
+		_ = a.Infra.Cache.Set(r.Context(), "facts:"+strings.ToUpper(strings.TrimSpace(ticker)), string(payload), 5*time.Minute)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"facts": rows,
 		"meta": map[string]any{
 			"api_version": APIContractVersion,
 			"count":       len(rows),
-			"ticker":      r.URL.Query().Get("ticker"),
+			"ticker":      ticker,
+			"cache_hit":   cacheHit,
 		},
 	})
 }
@@ -180,6 +205,9 @@ func (a API) ingest(w http.ResponseWriter, r *http.Request) {
 	if err != nil && job == nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	if job != nil {
+		a.afterWrite(r.Context(), a.actorOf(r), req, job)
 	}
 	status := http.StatusOK
 	if job != nil && job.Status == model.StatusFailed {

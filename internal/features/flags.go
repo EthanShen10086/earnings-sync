@@ -1,6 +1,8 @@
 // Package features resolves pluggable advanced capabilities and graceful degradation.
-// Secrets and backends are optional: flags off → noop; flags on without deps → degrade to noop;
-// flags on with deps → enable. The minimum ingest→store→query path never requires them.
+// Secrets and backends are optional: flags off → noop; flags on without remote deps →
+// in-process Memory/file stubs that still execute (cache hit, queue deliver, audit append…);
+// flags on with deps → same stub adapters (remote clients live under internal/infra).
+// The minimum ingest→store→query path never requires advanced flags.
 package features
 
 import (
@@ -14,7 +16,7 @@ type State string
 const (
 	StateDisabled State = "disabled" // flag off
 	StateEnabled  State = "enabled"  // flag on and dependency available
-	StateDegraded State = "degraded" // flag on but dependency missing → stub/noop
+	StateDegraded State = "degraded" // flag on but dependency missing → runnable in-process stub
 	StateAutoOff  State = "auto-off" // auto mode, dependency missing → stay off
 )
 
@@ -143,25 +145,35 @@ func Resolve(flags Flags, deps Deps) Bundle {
 
 // UseGoogleSheets is true when Google Sheets should be attempted (creds present and not forced off).
 func (b Bundle) UseGoogleSheets() bool {
-	return wantActive(b.Flags.SheetsGoogle, b.Deps.GoogleCreds != "")
+	return wantLive(b.Flags.SheetsGoogle, b.Deps.GoogleCreds != "")
 }
 
-// UseLLM is true when the model provider should be wired.
+// UseLLM is true when a model provider should be wired (live key or forced-on stub).
 func (b Bundle) UseLLM() bool {
-	return wantActive(b.Flags.LLM, b.Deps.ModelAPIKey != "")
+	return wantRunnable(b.Flags.LLM, b.Deps.ModelAPIKey != "")
 }
 
-// UseNotify is true when Feishu (or other notifier) should be wired.
+// LiveLLM is true when a real API key is present for the remote model.
+func (b Bundle) LiveLLM() bool {
+	return wantLive(b.Flags.LLM, b.Deps.ModelAPIKey != "")
+}
+
+// UseNotify is true when a notifier should be wired (live webhook or forced-on stub).
 func (b Bundle) UseNotify() bool {
-	return wantActive(b.Flags.Notify, b.Deps.FeishuWebhook != "")
+	return wantRunnable(b.Flags.Notify, b.Deps.FeishuWebhook != "")
+}
+
+// LiveNotify is true when a real Feishu webhook is configured.
+func (b Bundle) LiveNotify() bool {
+	return wantLive(b.Flags.Notify, b.Deps.FeishuWebhook != "")
 }
 
 // UseOTel is true when OTLP export should be attempted.
 func (b Bundle) UseOTel() bool {
-	return wantActive(b.Flags.OTelExport, b.Deps.OTLPEndpoint != "")
+	return wantLive(b.Flags.OTelExport, b.Deps.OTLPEndpoint != "")
 }
 
-// Enabled reports whether a named advanced plugin is live (not stub).
+// Enabled reports whether a named advanced plugin is fully live (deps present).
 func (b Bundle) Enabled(name string) bool {
 	for _, s := range b.Report {
 		if s.Name == name {
@@ -171,7 +183,31 @@ func (b Bundle) Enabled(name string) bool {
 	return false
 }
 
-func wantActive(w Want, depOK bool) bool {
+// Active reports whether a named plugin runs real logic (enabled or degraded stub).
+// Flag-off / auto-off plugins are inactive and use noop.
+func (b Bundle) Active(name string) bool {
+	for _, s := range b.Report {
+		if s.Name == name {
+			return s.State == StateEnabled || s.State == StateDegraded
+		}
+	}
+	return false
+}
+
+// wantRunnable: WantOn always runs (stub if no dep); WantAuto only with dep.
+func wantRunnable(w Want, depOK bool) bool {
+	switch w {
+	case WantOff:
+		return false
+	case WantOn:
+		return true
+	default: // auto
+		return depOK
+	}
+}
+
+// wantLive: only when dependency is actually present (no stub path).
+func wantLive(w Want, depOK bool) bool {
 	switch w {
 	case WantOff:
 		return false
@@ -191,13 +227,15 @@ func resolveCred(name string, w Want, depOK bool, depName string) Status {
 	case WantOn:
 		if depOK {
 			st.State = StateEnabled
+			st.Detail = "live credentials present"
 		} else {
 			st.State = StateDegraded
-			st.Detail = depName + " missing; capability skipped"
+			st.Detail = depName + " missing; using local stub provider"
 		}
 	default: // auto
 		if depOK {
 			st.State = StateEnabled
+			st.Detail = "auto; live credentials present"
 		} else {
 			st.State = StateAutoOff
 			st.Detail = depName + " unset"
@@ -214,20 +252,20 @@ func resolvePlugin[T any](name string, w Want, depOK bool, slot *T, live func() 
 		st.Detail = "flag off; using noop"
 		return st
 	case WantOn:
+		*slot = live()
 		if depOK {
-			*slot = live()
 			st.State = StateEnabled
-			st.Detail = "enabled (in-process adapter; remote client optional later)"
+			st.Detail = "enabled (in-process stub; remote client via internal/infra when dialable)"
 			return st
 		}
 		st.State = StateDegraded
-		st.Detail = "flag on but dependency missing; using noop"
+		st.Detail = "flag on; dependency missing — using in-process stub (not noop)"
 		return st
 	default: // auto
 		if depOK {
 			*slot = live()
 			st.State = StateEnabled
-			st.Detail = "auto-enabled"
+			st.Detail = "auto-enabled (in-process stub)"
 			return st
 		}
 		st.State = StateAutoOff

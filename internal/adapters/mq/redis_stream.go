@@ -12,13 +12,14 @@ import (
 	"time"
 )
 
-// RedisStreams publishes via XADD. Subscribe is a placeholder poll loop so
-// local Redis can be exercised without pulling a full client SDK.
+// RedisStreams publishes via XADD and fans out to in-process subscribers.
+// Same-process Subscribe delivers immediately; XADD still hits Redis for durability.
 type RedisStreams struct {
-	addr string
-	mu   sync.Mutex
-	conn net.Conn
-	r    *bufio.Reader
+	addr   string
+	mu     sync.Mutex
+	conn   net.Conn
+	r      *bufio.Reader
+	memory *Memory
 }
 
 // DialRedisStreams connects to Redis for stream publish.
@@ -32,7 +33,7 @@ func DialRedisStreams(ctx context.Context, raw string) (*RedisStreams, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := &RedisStreams{addr: addr, conn: conn, r: bufio.NewReader(conn)}
+	q := &RedisStreams{addr: addr, conn: conn, r: bufio.NewReader(conn), memory: NewMemory()}
 	if err := q.Ping(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -66,14 +67,23 @@ func (q *RedisStreams) Ping(ctx context.Context) error {
 
 func (q *RedisStreams) Publish(ctx context.Context, topic string, body []byte) (string, error) {
 	stream := "earnings:" + topic
-	return q.cmd(ctx, "XADD", stream, "*", "body", string(body))
+	id, err := q.cmd(ctx, "XADD", stream, "*", "body", string(body))
+	if err != nil {
+		return "", err
+	}
+	// Deliver to same-process subscribers so local E2E / workers run without XREADGROUP.
+	if q.memory != nil {
+		_, _ = q.memory.Publish(ctx, topic, body)
+	}
+	return id, nil
 }
 
-// Subscribe is intentionally a no-op wait: production would XREADGROUP.
-// Keeping it inert avoids spinning CI when Redis is only a placeholder.
-func (q *RedisStreams) Subscribe(ctx context.Context, _ string, _ func(Message) error) error {
-	<-ctx.Done()
-	return ctx.Err()
+// Subscribe registers an in-process handler (mirrors Memory fan-out after XADD).
+func (q *RedisStreams) Subscribe(ctx context.Context, topic string, handler func(Message) error) error {
+	if q.memory == nil {
+		q.memory = NewMemory()
+	}
+	return q.memory.Subscribe(ctx, topic, handler)
 }
 
 func (q *RedisStreams) cmd(ctx context.Context, args ...string) (string, error) {
