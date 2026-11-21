@@ -9,9 +9,9 @@ import (
 
 // Limiter is a simple token-bucket rate limiter keyed by client IP.
 type Limiter struct {
-	rps   float64
-	burst int
-	mu    sync.Mutex
+	rps     float64
+	burst   int
+	mu      sync.Mutex
 	buckets map[string]*bucket
 }
 

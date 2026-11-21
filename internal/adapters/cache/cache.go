@@ -17,8 +17,8 @@ type Cache interface {
 
 // Status describes how the cache was wired.
 type Status struct {
-	Backend   string `json:"backend"`
-	Degraded  bool   `json:"degraded"`
-	Configured bool  `json:"configured"`
-	Detail    string `json:"detail,omitempty"`
+	Backend    string `json:"backend"`
+	Degraded   bool   `json:"degraded"`
+	Configured bool   `json:"configured"`
+	Detail     string `json:"detail,omitempty"`
 }

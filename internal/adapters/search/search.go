@@ -5,9 +5,9 @@ import "context"
 
 // Hit is one search result.
 type Hit struct {
-	ID    string  `json:"id"`
-	Score float64 `json:"score"`
-	Snippet string `json:"snippet"`
+	ID      string  `json:"id"`
+	Score   float64 `json:"score"`
+	Snippet string  `json:"snippet"`
 }
 
 // Document is indexed content.
