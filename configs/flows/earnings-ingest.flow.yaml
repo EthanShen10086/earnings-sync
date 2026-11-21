@@ -47,6 +47,7 @@ nodes:
     tool: pipeline_ingest
     needs: [validate]
     onFailure: stop
+    timeoutMs: 90000
     input:
       ticker: { from: node, nodeId: validate, path: ticker }
       dry_run: { from: node, nodeId: validate, path: dry_run }
@@ -61,6 +62,7 @@ nodes:
     type: agent
     title: 总结本轮动作
     needs: [ingest]
+    timeoutMs: 30000
     prompt: |
       根据 ingest 结果写一句中文结论，说明 ticker、财季、cells 写入数、是否 dry_run。
       不要编造未提供的数字。
@@ -70,3 +72,4 @@ nodes:
     retry:
       maxAttempts: 2
       backoffMs: 100
+    onFailure: continue

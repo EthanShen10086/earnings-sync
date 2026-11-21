@@ -29,6 +29,8 @@ type Obs struct {
 	ReconcileDiff prometheus.Counter
 	NotifyFail    prometheus.Counter
 	Cells         prometheus.Counter
+	FlowDuration  *prometheus.HistogramVec
+	FlowNodeDur   *prometheus.HistogramVec
 }
 
 func New() *Obs {
@@ -63,9 +65,35 @@ func New() *Obs {
 			Name: "earnings_sheet_cells_written_total",
 			Help: "Input cells written to Google Sheets.",
 		}),
+		FlowDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "earnings_flow_duration_seconds",
+			Help:    "Orchestrator flow run duration.",
+			Buckets: []float64{0.05, 0.1, 0.5, 1, 2, 5, 15, 30, 60, 120},
+		}, []string{"status"}),
+		FlowNodeDur: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "earnings_flow_node_duration_seconds",
+			Help:    "Orchestrator node (step) duration.",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 2, 5, 15, 30, 60},
+		}, []string{"node_type", "status"}),
 	}
-	reg.MustRegister(o.JobDuration, o.ModelTokens, o.SheetLatency, o.ReconcileDiff, o.NotifyFail, o.Cells)
+	reg.MustRegister(o.JobDuration, o.ModelTokens, o.SheetLatency, o.ReconcileDiff, o.NotifyFail, o.Cells, o.FlowDuration, o.FlowNodeDur)
 	return o
+}
+
+// ObserveFlowRun records one orchestrator flow duration.
+func (o *Obs) ObserveFlowRun(status string, seconds float64) {
+	if o == nil || o.FlowDuration == nil {
+		return
+	}
+	o.FlowDuration.WithLabelValues(status).Observe(seconds)
+}
+
+// ObserveFlowNode records one orchestrator step duration.
+func (o *Obs) ObserveFlowNode(nodeType, status string, seconds float64) {
+	if o == nil || o.FlowNodeDur == nil {
+		return
+	}
+	o.FlowNodeDur.WithLabelValues(nodeType, status).Observe(seconds)
 }
 
 func (o *Obs) MetricsHandler() http.Handler {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/EthanShen10086/earnings-sync/internal/notify"
 )
@@ -253,6 +254,104 @@ func TestClientRequestIDIdempotent(t *testing.T) {
 	}
 	if first.RunID != second.RunID {
 		t.Fatalf("expected same run id, got %s vs %s", first.RunID, second.RunID)
+	}
+}
+
+func TestRequestTraceIDsAndProductEvents(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := OpenFileRunStore(filepath.Join(dir, "runs.json"), filepath.Join(dir, "events.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := NewSlogObserver(fs)
+	eng := &Engine{
+		Registry: Registry{Tools: BuiltinTools()},
+		Runs:     fs.Memory(),
+		Observer: obs,
+	}
+	state, err := eng.Run(context.Background(), FlowDefinition{
+		Nodes: []Node{{ID: "echo", Type: "tool", Tool: "echo", Input: "hi"}},
+	}, RunOptions{RequestID: "req-abc", TraceID: "trc-xyz"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RequestID != "req-abc" || state.TraceID != "trc-xyz" {
+		t.Fatalf("ids=%s/%s", state.RequestID, state.TraceID)
+	}
+	if state.DurationMs < 0 {
+		t.Fatal("missing duration")
+	}
+	loaded, ok := fs.Get(state.RunID)
+	if !ok || loaded.Status != StatusSucceeded {
+		t.Fatalf("persisted run missing: ok=%v %#v", ok, loaded)
+	}
+	evs := fs.Events(20)
+	names := map[string]bool{}
+	for _, ev := range evs {
+		names[ev.Name] = true
+		if ev.RequestID != "req-abc" || ev.TraceID != "trc-xyz" {
+			t.Fatalf("event ids %#v", ev)
+		}
+	}
+	for _, want := range []string{"flow.start", "step.success", "flow.success"} {
+		if !names[want] {
+			t.Fatalf("missing product event %s in %#v", want, names)
+		}
+	}
+	// reload from disk
+	fs2, err := OpenFileRunStore(filepath.Join(dir, "runs.json"), filepath.Join(dir, "events.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fs2.Get(state.RunID); !ok {
+		t.Fatal("run not reloaded from disk")
+	}
+	if len(fs2.Events(0)) < 3 {
+		t.Fatalf("events not reloaded: %d", len(fs2.Events(0)))
+	}
+}
+
+func TestFlowTimeout(t *testing.T) {
+	tools := BuiltinTools()
+	tools["slow"] = func(ctx context.Context, _ any) (any, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+			return map[string]any{"ok": true}, nil
+		}
+	}
+	eng := &Engine{
+		Registry:       Registry{Tools: tools},
+		DefaultTimeout: 30 * time.Millisecond,
+	}
+	state, err := eng.Run(context.Background(), FlowDefinition{
+		Nodes: []Node{{ID: "slow", Type: "tool", Tool: "slow", TimeoutMs: 5000}},
+	}, RunOptions{})
+	if err == nil {
+		t.Fatal("expected timeout failure")
+	}
+	if state.Status != StatusFailed && state.Status != StatusCanceled {
+		t.Fatalf("status=%s", state.Status)
+	}
+}
+
+func TestHealthCheck(t *testing.T) {
+	dir := t.TempDir()
+	bridge := testBridge(t)
+	tools := MergeTools(BuiltinTools(), bridge.Tools())
+	rep := CheckHealth(HealthOpts{
+		FlowPath:   "../../configs/flows/earnings-ingest.flow.yaml",
+		Tools:      tools,
+		RunsPath:   filepath.Join(dir, "runs.json"),
+		EventsPath: filepath.Join(dir, "events.json"),
+	})
+	if rep.Status != "ok" {
+		t.Fatalf("health=%#v", rep)
+	}
+	bad := CheckHealth(HealthOpts{FlowPath: "../../configs/flows/earnings-ingest.flow.yaml", Tools: BuiltinTools()})
+	if bad.Status != "fail" {
+		t.Fatalf("expected missing pipeline_ingest to fail, got %#v", bad)
 	}
 }
 
