@@ -64,13 +64,20 @@ func NewLocalPipeline(opts LocalPipelineOpts) (*PipelineBridge, error) {
 			return nil, err
 		}
 	}
-	store, err := job.Open(jobPath)
-	if err != nil {
-		return nil, err
-	}
 	mem := &sheet.Memory{}
 	sheets := sheet.Store(mem)
 	mode := sheet.ParseWriteMode(opts.StorageMode)
+	// Job PG only when this bridge opts into DatabaseURL (tests stay file-backed).
+	jobOpts := job.OpenOptions{Path: jobPath}
+	if opts.DatabaseURL != "" {
+		jobOpts.DatabaseURL = opts.DatabaseURL
+		jobOpts.MigrationsDir = opts.MigrationsDir
+	}
+	store, jobCleanup, err := job.OpenAuto(context.Background(), jobOpts)
+	if err != nil {
+		return nil, err
+	}
+	_ = jobCleanup // process-lifetime
 	if opts.StorageMode != "" && (mode == sheet.ModeDual || mode == sheet.ModePGOnly) {
 		built, cleanup, err := buildStoreLocal(config.Settings{
 			StorageMode:   opts.StorageMode,

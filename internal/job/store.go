@@ -12,8 +12,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// Store is a JSON file of jobs. It is the idempotency log and the debug record.
-type Store struct {
+// Store is the durable job registry used for idempotency and debugging.
+// File-backed and Postgres implementations both satisfy this interface.
+type Store interface {
+	Create(ticker, hash, locator, source string, dry bool) *model.Job
+	ByHash(hash string) (*model.Job, bool)
+	ByLocator(locator string) (*model.Job, bool)
+	Get(id string) (*model.Job, bool)
+	Save(j *model.Job) error
+}
+
+// FileStore is a JSON file of jobs. It is the single-host fallback when DATABASE_URL is unset.
+type FileStore struct {
 	path   string
 	mu     sync.Mutex
 	jobs   map[string]*model.Job
@@ -21,11 +31,12 @@ type Store struct {
 	byLoc  map[string]string
 }
 
-func Open(path string) (*Store, error) {
+// Open opens (or creates) a file-backed job store.
+func Open(path string) (*FileStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil && filepath.Dir(path) != "." {
 		return nil, err
 	}
-	s := &Store{
+	s := &FileStore{
 		path:   path,
 		jobs:   map[string]*model.Job{},
 		byHash: map[string]string{},
@@ -57,7 +68,7 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Create(ticker, hash, locator, source string, dry bool) *model.Job {
+func (s *FileStore) Create(ticker, hash, locator, source string, dry bool) *model.Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
@@ -77,7 +88,7 @@ func (s *Store) Create(ticker, hash, locator, source string, dry bool) *model.Jo
 	return clone(j)
 }
 
-func (s *Store) ByHash(hash string) (*model.Job, bool) {
+func (s *FileStore) ByHash(hash string) (*model.Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.byHash[hash]
@@ -87,7 +98,7 @@ func (s *Store) ByHash(hash string) (*model.Job, bool) {
 	return clone(s.jobs[id]), true
 }
 
-func (s *Store) ByLocator(locator string) (*model.Job, bool) {
+func (s *FileStore) ByLocator(locator string) (*model.Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.byLoc[locator]
@@ -97,7 +108,7 @@ func (s *Store) ByLocator(locator string) (*model.Job, bool) {
 	return clone(s.jobs[id]), true
 }
 
-func (s *Store) Get(id string) (*model.Job, bool) {
+func (s *FileStore) Get(id string) (*model.Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -107,7 +118,7 @@ func (s *Store) Get(id string) (*model.Job, bool) {
 	return clone(j), true
 }
 
-func (s *Store) Save(j *model.Job) error {
+func (s *FileStore) Save(j *model.Job) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j.UpdatedAt = time.Now().UTC()
@@ -122,7 +133,7 @@ func (s *Store) Save(j *model.Job) error {
 	return s.persist()
 }
 
-func (s *Store) persist() error {
+func (s *FileStore) persist() error {
 	list := make([]*model.Job, 0, len(s.jobs))
 	for _, j := range s.jobs {
 		list = append(list, j)

@@ -58,6 +58,10 @@ curl 'http://127.0.0.1:8090/v1/facts?ticker=AAPL'
 
 编排 CLI 同样读 `STORAGE_MODE` / `DATABASE_URL`；默认仍是 Memory `sheets-only`。
 
+## 任务 / 编排幂等
+
+`DATABASE_URL` 同时启用 `jobs` / `flow_runs` / `product_events`（见 [jobs-runs-pg.md](./jobs-runs-pg.md)）。与 Sheets 事实双写独立：即使 `STORAGE_MODE=sheets-only`，只要配置了 `DATABASE_URL`，HTTP 服务与 `cmd/orchestrate` 仍会把 job/run 幂等写入 PG。
+
 ## 本轮不做
 
 Kafka、K8s、完整 IAM、湖仓、CDN、蓝绿等——见 Project 路线图 `platform-roadmap.md`。

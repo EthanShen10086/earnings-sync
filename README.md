@@ -25,7 +25,7 @@ curl -F ticker=AAPL -F file=@testdata/aapl_2026q4.csv http://127.0.0.1:8090/v1/i
 
 - 2026Q4 那一行的黄色格子被写上数，灰色公式列自己重算，旁边的图跟着变。
 - 飞书群收到要点、勾稽差额和表格链接。
-- `data/jobs.json` 里能看到每一段耗时。同一份文件再传一次不会重复写，也不会重复发。
+- 任务记录在 `data/jobs.json`（无 `DATABASE_URL`）或 PostgreSQL `jobs` 表；同一份文件再传一次不会重复写，也不会重复发。
 - 结构化 CSV 里的多个财季会合成一次表格批量写入，不把这些数字再送给模型逐格抄写。说明在 [docs/connect.md](docs/connect.md)。
 
 只想先看抽取结果、不碰表格和飞书时，才加 `-F dry_run=true`。
@@ -72,7 +72,7 @@ make pg-up          # deploy/docker-compose.yml 起 Postgres（Redis 用 --profi
 make test           # 含双写单测；CI 会带真实 PG
 ```
 
-说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。最小只读页：[apps/web](apps/web)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
+说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。Jobs/runs 跨进程幂等：[docs/jobs-runs-pg.md](docs/jobs-runs-pg.md)。最小只读页：[apps/web](apps/web)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
 
 ## AI 编排引擎
 
@@ -87,12 +87,14 @@ make orchestrate       # fixture dry-run（真实解析，不写表）
 make orchestrate-live  # fixture 非 dry：写入 Memory；导出 writes / runs / events
 ```
 
-落盘（默认可查询）：
+落盘（无 `DATABASE_URL` 时可查询）：
 
 - `data/orchestrator-runs.json` — 每次 flow 的 RunState（含 request/trace id、步骤耗时）
 - `data/orchestrator-events.json` — 产品闭环事件 `flow.start|success|fail`、`step.*`
 - `data/orchestrator-e2e-writes.json` — live 写入证据（`-dump-writes`）
 - `data/orchestrator-jobs.json` — pipeline job 幂等与分段耗时
+
+设置 `DATABASE_URL` 后，上述 jobs/runs/events 改写 PostgreSQL（`jobs` / `flow_runs` / `product_events`），跨进程仍可按幂等键恢复。
 
 ## 其他入口
 
