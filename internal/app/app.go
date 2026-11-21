@@ -14,6 +14,7 @@ import (
 	"github.com/EthanShen10086/earnings-sync/internal/agent"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
+	"github.com/EthanShen10086/earnings-sync/internal/features"
 	"github.com/EthanShen10086/earnings-sync/internal/httpapi"
 	"github.com/EthanShen10086/earnings-sync/internal/infra"
 	"github.com/EthanShen10086/earnings-sync/internal/job"
@@ -53,13 +54,18 @@ func otelClientFilter(ctx context.Context, req, rsp interface{}, next filter.Cli
 func Run() error {
 	settings := config.LoadSettings()
 	ctx := context.Background()
-	shutdown, err := observe.SetupTracing(ctx, settings.OTLPEndpoint)
+	feat := features.Resolve(features.FromEnv())
+	otelEndpoint := settings.OTLPEndpoint
+	if !feat.UseOTel() {
+		otelEndpoint = ""
+	}
+	shutdown, err := observe.SetupTracing(ctx, otelEndpoint)
 	if err != nil {
 		return err
 	}
 	defer shutdown(context.Background())
 
-	pipe, obs, cleanup, err := Build(settings)
+	pipe, obs, cleanup, err := BuildWithFeatures(settings, feat)
 	if err != nil {
 		return err
 	}
@@ -82,6 +88,9 @@ func Run() error {
 		"storage_mode", settings.StorageMode,
 		"infra", stack.Summary(),
 	)
+	for _, st := range feat.Report {
+		obs.Logger.Info("feature", "name", st.Name, "want", string(st.Want), "state", string(st.State), "detail", st.Detail)
+	}
 	go syncOnStart(pipe, obs)
 	return s.Serve()
 }
@@ -104,6 +113,11 @@ func syncOnStart(pipe *pipeline.Pipeline, obs *observe.Obs) {
 
 // Build wires config, storage, the model, Sheets/PG dual-write, and Feishu.
 func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() error, error) {
+	return BuildWithFeatures(settings, features.Resolve(features.FromEnv()))
+}
+
+// BuildWithFeatures is Build with an explicit feature bundle (tests / CLI).
+func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipeline.Pipeline, *observe.Obs, func() error, error) {
 	noop := func() error { return nil }
 	reg, err := config.Load(settings.CompaniesFile)
 	if err != nil {
@@ -116,7 +130,7 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 	obs := observe.New()
 	var model extract.Provider
 	var chatter agent.Chatter
-	if settings.ModelAPIKey != "" {
+	if feat.UseLLM() && settings.ModelAPIKey != "" {
 		provider := extract.HTTPProvider{
 			NameStr: "deepseek",
 			BaseURL: settings.ModelBaseURL,
@@ -126,14 +140,23 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 		model = provider
 		chatter = provider
 	}
-	sheets, cleanup, err := BuildStore(context.Background(), settings)
+	built, err := BuildStoreDetailed(context.Background(), settings, feat)
 	if err != nil {
 		return nil, nil, noop, err
 	}
+	cleanup := built.Cleanup
+	for _, note := range built.Notes {
+		obs.Logger.Info("storage degrade", "note", note, "mode", string(built.Mode), "sheets", built.SheetsKind, "pg", built.PGKind)
+	}
 	// Jobs follow DATABASE_URL when set (cross-process idempotency); else jobs.json.
+	// If PG was requested for facts but unavailable, still try jobs file fallback.
+	dbURL := settings.DatabaseURL
+	if built.PGKind != "postgres" {
+		dbURL = ""
+	}
 	store, jobCleanup, err := job.OpenAuto(context.Background(), job.OpenOptions{
 		Path:          settings.JobStorePath,
-		DatabaseURL:   settings.DatabaseURL,
+		DatabaseURL:   dbURL,
 		MigrationsDir: settings.MigrationsDir,
 	})
 	if err != nil {
@@ -150,7 +173,7 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 		return err2
 	}
 	var sender notify.Sender
-	if settings.FeishuWebhook != "" {
+	if feat.UseNotify() && settings.FeishuWebhook != "" {
 		sender = notify.Feishu{Webhook: settings.FeishuWebhook, Secret: settings.FeishuSecret}
 	}
 	return &pipeline.Pipeline{
@@ -158,7 +181,7 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() e
 		Macro:        macroReg,
 		Jobs:         store,
 		Extractor:    extract.Extractor{Model: model},
-		Sheets:       sheets,
+		Sheets:       built.Store,
 		Notifier:     sender,
 		Chatter:      chatter,
 		CredFile:     settings.GoogleCreds,

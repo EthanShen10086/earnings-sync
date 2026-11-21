@@ -2,6 +2,8 @@
 
 诚实前提：**不是生产基建。** 本轮提供可插拔接口、本地 stub、compose/k8s 骨架；高级依赖缺失时自动降级，**不影响** ingest → extract → Sheets/Memory/PG → query 最小链路。
 
+与 [feature-flags.md](feature-flags.md) 的关系：`FEATURE_*` 控制进程内 noop/memory 插件开关；本目录的 `internal/adapters` + `internal/infra` 负责可拨号客户端（Redis RESP / NATS TCP / 文件系统 / 审计文件|PG）、网关限流与 deploy 骨架。两者并存，默认都不阻断最小链路。
+
 ## 组件
 
 | 能力 | 包 | 默认 / 降级 | 真实后端触发 |

@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/sheet"
@@ -17,31 +17,28 @@ func buildStoreLocal(settings config.Settings, mem *sheet.Memory) (sheet.Store, 
 	if settings.DatabaseURL != "" {
 		pg, err := postgres.Open(context.Background(), settings.DatabaseURL)
 		if err != nil {
-			return nil, cleanup, err
+			slog.Warn("orchestrator: postgres unavailable; degrading storage", "want", mode, "err", err.Error())
+		} else {
+			if settings.MigrationsDir != "" {
+				pg.MigrationsDir = settings.MigrationsDir
+			}
+			pgStore = pg
+			cleanup = pg.Close
 		}
-		if settings.MigrationsDir != "" {
-			pg.MigrationsDir = settings.MigrationsDir
-		}
-		pgStore = pg
-		cleanup = pg.Close
+	}
+	needsPG := mode == sheet.ModePGOnly || mode == sheet.ModeDual
+	if needsPG && pgStore == nil {
+		slog.Warn("orchestrator: DATABASE_URL missing or PG down; using Memory sheets-only", "want", mode)
+		return mem, cleanup, nil
 	}
 	switch mode {
 	case sheet.ModeSheetsOnly:
 		return mem, cleanup, nil
-	case sheet.ModePGOnly:
-		if pgStore == nil {
-			_ = cleanup()
-			return nil, func() error { return nil }, fmt.Errorf("STORAGE_MODE=pg-only requires DATABASE_URL")
-		}
-		return &sheet.Dual{Sheets: mem, PG: pgStore, Mode: mode, Fail: fail}, cleanup, nil
-	case sheet.ModeDual:
-		if pgStore == nil {
-			_ = cleanup()
-			return nil, func() error { return nil }, fmt.Errorf("STORAGE_MODE=dual requires DATABASE_URL")
-		}
+	case sheet.ModePGOnly, sheet.ModeDual:
 		return &sheet.Dual{Sheets: mem, PG: pgStore, Mode: mode, Fail: fail}, cleanup, nil
 	default:
 		_ = cleanup()
-		return nil, func() error { return nil }, fmt.Errorf("unknown STORAGE_MODE %q", settings.StorageMode)
+		slog.Warn("orchestrator: unknown STORAGE_MODE; using Memory", "mode", settings.StorageMode)
+		return mem, func() error { return nil }, nil
 	}
 }
