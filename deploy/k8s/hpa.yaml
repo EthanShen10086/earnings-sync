@@ -1,0 +1,21 @@
+# HPA placeholder — enable after metrics-server / custom metrics exist.
+# Intentionally conservative; tune after real load tests.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: earnings-sync
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: earnings-sync
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  # behavior: omitted — use cluster defaults until SLO-driven tuning

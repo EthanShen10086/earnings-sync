@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/EthanShen10086/earnings-sync/internal/model"
@@ -287,6 +288,19 @@ type Settings struct {
 	StorageMode     string // sheets-only | pg-only | dual
 	StorageFail     string // all | partial
 	MigrationsDir   string
+
+	// Optional data-plane (Redis/MQ/objects/CDN/gateway/audit/search).
+	// Missing backends degrade; set InfraStrict to fail instead.
+	RedisURL        string
+	NATSURL         string
+	ObjectStoreDir  string
+	CDNBaseURL      string
+	AuditLogPath    string
+	SearchIndexPath string
+	RateLimitRPS    float64
+	RateLimitBurst  int
+	InfraStrict     bool
+
 	// Auth* mirrors AUTH_* for IAM/SSO placeholders (see internal/auth).
 	AuthMode        string
 	AuthBearerToken string
@@ -311,6 +325,15 @@ func LoadSettings() Settings {
 		StorageMode:     env("STORAGE_MODE", "sheets-only"),
 		StorageFail:     env("STORAGE_FAIL_POLICY", "all"),
 		MigrationsDir:   os.Getenv("MIGRATIONS_DIR"),
+		RedisURL:        os.Getenv("REDIS_URL"),
+		NATSURL:         os.Getenv("NATS_URL"),
+		ObjectStoreDir:  env("OBJECT_STORE_DIR", "data/objects"),
+		CDNBaseURL:      os.Getenv("CDN_BASE_URL"),
+		AuditLogPath:    env("AUDIT_LOG_PATH", "data/audit.jsonl"),
+		SearchIndexPath: env("SEARCH_INDEX_PATH", "data/search"),
+		RateLimitRPS:    envFloat("RATE_LIMIT_RPS", 0),
+		RateLimitBurst:  envInt("RATE_LIMIT_BURST", 20),
+		InfraStrict:     envBool("INFRA_STRICT", false),
 		AuthMode:        env("AUTH_MODE", "bypass"),
 		AuthBearerToken: os.Getenv("AUTH_BEARER_TOKEN"),
 	}
@@ -347,4 +370,43 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
+}
+
+func envInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

@@ -1,0 +1,72 @@
+# Minimal Deployment skeleton — not a production topology.
+# Blue/green: keep a second Deployment (earnings-sync-green) and switch Service
+# selector; or use an Ingress / Service Mesh canary. This file is a placeholder.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: earnings-sync
+  labels:
+    app: earnings-sync
+    # slot: blue | green  — flip Service selector for blue/green cutover
+    slot: blue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: earnings-sync
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: earnings-sync
+        slot: blue
+    spec:
+      containers:
+        - name: api
+          image: earnings-sync:local # replace in real CI/CD
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+          env:
+            - name: STORAGE_MODE
+              value: sheets-only
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: earnings-sync
+                  key: database-url
+                  optional: true
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: OBJECT_STORE_DIR
+              value: /var/earnings/objects
+            - name: RATE_LIMIT_RPS
+              value: "0"
+            - name: INFRA_STRICT
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: objects
+              mountPath: /var/earnings/objects
+      volumes:
+        - name: objects
+          emptyDir: {}

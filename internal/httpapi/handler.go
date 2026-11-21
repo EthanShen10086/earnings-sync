@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/EthanShen10086/earnings-sync/internal/auth"
+	"github.com/EthanShen10086/earnings-sync/internal/infra"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
 	"github.com/EthanShen10086/earnings-sync/internal/pipeline"
@@ -23,13 +24,12 @@ type API struct {
 	Facts  sheet.Reader // optional; Postgres or Memory readback for apps/web
 	Auth   auth.Config
 	Alerts *observe.AlertBoard
+	Infra  *infra.Stack // optional data-plane adapters (cache/mq/objects/audit/search)
 }
 
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.Handle("GET /metrics", a.Obs.MetricsHandler())
 	mux.HandleFunc("GET /v1/meta", a.meta)
 	mux.HandleFunc("GET /v1/auth/me", a.authMe)
@@ -46,7 +46,20 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/jobs/{id}", a.getJob)
 	mux.HandleFunc("GET /v1/facts", a.listFacts)
 	mux.HandleFunc("OPTIONS /v1/facts", optionsOK)
-	return auth.Middleware(a.authConfig(), mux)
+	h := auth.Middleware(a.authConfig(), mux)
+	if a.Infra != nil && a.Infra.Gateway != nil {
+		h = a.Infra.Gateway.Middleware(h)
+	}
+	return h
+}
+
+func (a API) healthz(w http.ResponseWriter, _ *http.Request) {
+	body := map[string]any{"status": "ok"}
+	if a.Infra != nil {
+		body["infra"] = a.Infra.Status
+		body["infra_degraded"] = a.Infra.Degraded()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (a API) authConfig() auth.Config {
