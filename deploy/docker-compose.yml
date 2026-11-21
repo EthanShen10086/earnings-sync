@@ -15,12 +15,35 @@ services:
       timeout: 3s
       retries: 20
 
-  # Placeholder only — not wired into the app this round (P1 cache/session).
+  # Optional cache / Redis Streams MQ. App degrades to in-memory when down.
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    profiles: ["cache"]
+    profiles: ["cache", "mq"]
+
+  # Optional lightweight MQ alternative to Redis Streams.
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-js", "-m", "8222"]
+    profiles: ["mq"]
+
+  # Local object-store stand-in (S3 API). App still defaults to filesystem stub.
+  minio:
+    image: minio/minio:RELEASE.2024-10-02T17-50-41Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: earnings
+      MINIO_ROOT_PASSWORD: earningsdev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - earnings_minio:/data
+    profiles: ["objects"]
 
   jaeger:
     image: jaegertracing/all-in-one:1.57
@@ -39,3 +62,4 @@ services:
 
 volumes:
   earnings_pg:
+  earnings_minio:

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/EthanShen10086/earnings-sync/internal/infra"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
 	"github.com/EthanShen10086/earnings-sync/internal/pipeline"
@@ -17,13 +18,12 @@ type API struct {
 	Pipe  *pipeline.Pipeline
 	Obs   *observe.Obs
 	Facts sheet.Reader // optional; Postgres or Memory readback for apps/web
+	Infra *infra.Stack // optional data-plane adapters (cache/mq/objects/audit/search)
 }
 
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.Handle("GET /metrics", a.Obs.MetricsHandler())
 	mux.HandleFunc("POST /v1/ingest", a.ingest)
 	mux.HandleFunc("POST /v1/watch", a.watch)
@@ -35,7 +35,20 @@ func (a API) Handler() http.Handler {
 		cors(w)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return mux
+	h := http.Handler(mux)
+	if a.Infra != nil && a.Infra.Gateway != nil {
+		h = a.Infra.Gateway.Middleware(h)
+	}
+	return h
+}
+
+func (a API) healthz(w http.ResponseWriter, _ *http.Request) {
+	body := map[string]any{"status": "ok"}
+	if a.Infra != nil {
+		body["infra"] = a.Infra.Status
+		body["infra_degraded"] = a.Infra.Degraded()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (a API) listFacts(w http.ResponseWriter, r *http.Request) {

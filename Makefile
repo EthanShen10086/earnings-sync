@@ -1,10 +1,14 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up
 
 test:
 	go test ./...
 
 pg-up:
 	docker compose -f deploy/docker-compose.yml up -d postgres
+
+# Optional Redis (+ NATS via mq profile). App degrades if these are down.
+infra-up:
+	docker compose -f deploy/docker-compose.yml --profile cache --profile mq up -d
 
 pg-test:
 	@test -n "$$DATABASE_URL" || (echo 'set DATABASE_URL first'; exit 1)
