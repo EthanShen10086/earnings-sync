@@ -4,3 +4,4 @@ bin/
 *.db
 *.exe
 coverage.out
+.worktrees/

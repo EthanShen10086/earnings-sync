@@ -1,7 +1,10 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate
 
 test:
 	go test ./...
+
+orchestrate:
+	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml -input ticker=AAPL -input dry_run=true
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')

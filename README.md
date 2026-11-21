@@ -59,6 +59,16 @@ go run ./cmd/sheetcreate -ticker MSFT
 
 这一步要先做完 `docs/connect.md` 第 4 节。给出 `-ticker` 时，表头用这家公司的分部，并把 spreadsheet id 写回配置。服务账号建不了表时，用你自己的 Google 账号建一份同样的三张表，共享给服务账号后再把 id 写进配置。
 
+## AI 编排引擎
+
+可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition、依赖、分支、重试）。说明见 [docs/orchestrator.md](docs/orchestrator.md)。
+
+```bash
+go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml -input ticker=AAPL -input dry_run=true
+# 或
+make orchestrate
+```
+
 ## 其他入口
 
 ```bash
