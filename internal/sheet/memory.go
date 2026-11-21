@@ -2,6 +2,7 @@ package sheet
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/EthanShen10086/earnings-sync/internal/macro"
@@ -23,51 +24,77 @@ type Store interface {
 	UpsertMacro(ctx context.Context, spreadsheetID string, rel model.MacroRelease) (int, error)
 }
 
-// Memory records writes for tests.
+// Memory records writes for tests and offline demos (also implements Reader).
 type Memory struct {
 	mu     sync.Mutex
 	Writes []Write
+	Facts  []FactRow
 	Charts []model.ChartSpec
 	Titles map[string]bool
 	Err    error
 }
 
-func (m *Memory) Upsert(_ context.Context, _ string, ex model.Extraction) (int, error) {
+func (m *Memory) Upsert(ctx context.Context, spreadsheetID string, ex model.Extraction) (int, error) {
+	return m.UpsertAll(ctx, spreadsheetID, []model.Extraction{ex})
+}
+
+func (m *Memory) UpsertAll(_ context.Context, spreadsheetID string, periods []model.Extraction) (int, error) {
 	if m.Err != nil {
 		return 0, m.Err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
-	for _, f := range ex.Facts {
-		ref, ok := locate(f.LineItem, ex)
-		if !ok {
-			continue
+	for _, ex := range periods {
+		for _, f := range ex.Facts {
+			ref, ok := locate(f.LineItem, ex)
+			if !ok {
+				continue
+			}
+			var v any
+			if f.Value != nil {
+				v = *f.Value
+			} else if f.Text != "" {
+				v = f.Text
+			} else {
+				continue
+			}
+			m.Writes = append(m.Writes, Write{Sheet: ref.Sheet, A1: ref.Col + "5", Value: v})
+			n++
 		}
-		var v any
-		if f.Value != nil {
-			v = *f.Value
-		} else if f.Text != "" {
-			v = f.Text
-		} else {
-			continue
+		for _, row := range FactRowsFromExtraction(spreadsheetID, ex) {
+			m.upsertFactLocked(row)
 		}
-		m.Writes = append(m.Writes, Write{Sheet: ref.Sheet, A1: ref.Col + "5", Value: v})
-		n++
 	}
 	return n, nil
 }
 
-func (m *Memory) UpsertAll(ctx context.Context, spreadsheetID string, periods []model.Extraction) (int, error) {
-	n := 0
-	for _, ex := range periods {
-		wrote, err := m.Upsert(ctx, spreadsheetID, ex)
-		n += wrote
-		if err != nil {
-			return n, err
+func (m *Memory) upsertFactLocked(row FactRow) {
+	for i := range m.Facts {
+		if m.Facts[i].IdempotencyKey == row.IdempotencyKey {
+			m.Facts[i] = row
+			return
 		}
 	}
-	return n, nil
+	m.Facts = append(m.Facts, row)
+}
+
+// ListFacts implements Reader for offline / Memory+PG dual demos.
+func (m *Memory) ListFacts(_ context.Context, ticker string) ([]FactRow, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	out := make([]FactRow, 0, len(m.Facts))
+	for _, f := range m.Facts {
+		if ticker != "" && f.Ticker != ticker {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 func (m *Memory) UpsertMacro(_ context.Context, _ string, rel model.MacroRelease) (int, error) {

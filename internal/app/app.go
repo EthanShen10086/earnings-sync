@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -59,14 +58,19 @@ func Run() error {
 	}
 	defer shutdown(context.Background())
 
-	pipe, obs, err := Build(settings)
+	pipe, obs, cleanup, err := Build(settings)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = cleanup() }()
 	s := trpc.NewServer()
-	api := httpapi.API{Pipe: pipe, Obs: obs}
+	api := httpapi.API{Pipe: pipe, Obs: obs, Facts: sheet.ReaderFrom(pipe.Sheets)}
 	thttp.RegisterNoProtocolServiceMux(s.Service("trpc.earnings.sync.HTTP"), api.Handler())
-	obs.Logger.Info("earnings-sync listening", "http", ":8090", "admin", ":8091")
+	obs.Logger.Info("earnings-sync listening",
+		"http", ":8090",
+		"admin", ":8091",
+		"storage_mode", settings.StorageMode,
+	)
 	go syncOnStart(pipe, obs)
 	return s.Serve()
 }
@@ -87,19 +91,20 @@ func syncOnStart(pipe *pipeline.Pipeline, obs *observe.Obs) {
 	}
 }
 
-// Build wires config, storage, the model, Sheets, and Feishu.
-func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
+// Build wires config, storage, the model, Sheets/PG dual-write, and Feishu.
+func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() error, error) {
+	noop := func() error { return nil }
 	reg, err := config.Load(settings.CompaniesFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, noop, err
 	}
 	macroReg, err := config.LoadMacro(settings.MacroFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, noop, err
 	}
 	store, err := job.Open(settings.JobStorePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, noop, err
 	}
 	obs := observe.New()
 	var model extract.Provider
@@ -114,13 +119,9 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 		model = provider
 		chatter = provider
 	}
-	var sheets sheet.Store
-	if settings.GoogleCreds != "" {
-		g, err := sheet.NewGoogle(context.Background(), settings.GoogleCreds)
-		if err != nil {
-			return nil, nil, fmt.Errorf("google sheets: %w", err)
-		}
-		sheets = g
+	sheets, cleanup, err := BuildStore(context.Background(), settings)
+	if err != nil {
+		return nil, nil, noop, err
 	}
 	var sender notify.Sender
 	if settings.FeishuWebhook != "" {
@@ -139,5 +140,5 @@ func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, error) {
 		Obs:          obs,
 		SECUserAgent: settings.SECUserAgent,
 		Client:       http.DefaultClient,
-	}, obs, nil
+	}, obs, cleanup, nil
 }

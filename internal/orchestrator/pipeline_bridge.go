@@ -64,15 +64,33 @@ func NewLocalPipeline(opts LocalPipelineOpts) (*PipelineBridge, error) {
 		return nil, err
 	}
 	mem := &sheet.Memory{}
+	sheets := sheet.Store(mem)
+	settings := config.LoadSettings()
+	mode := sheet.ParseWriteMode(settings.StorageMode)
+	if mode == sheet.ModeDual || mode == sheet.ModePGOnly {
+		built, cleanup, err := buildOfflineStore(settings, mem)
+		if err != nil {
+			return nil, err
+		}
+		_ = cleanup // closed by process exit; tests should use sheets-only
+		sheets = built
+	}
 	pipe := &pipeline.Pipeline{
 		Companies: reg,
 		Macro:     macroReg,
 		Jobs:      store,
-		Sheets:    mem,
+		Sheets:    sheets,
 		Notifier:  opts.Notifier,
 		Obs:       observe.New(),
 	}
 	return &PipelineBridge{Pipe: pipe, Memory: mem}, nil
+}
+
+func buildOfflineStore(settings config.Settings, mem *sheet.Memory) (sheet.Store, func() error, error) {
+	// Reuse app.BuildStore semantics without importing app (avoids pulling tRPC into tests awkwardly).
+	// Sheets side stays Memory when Google creds are absent.
+	settings.GoogleCreds = "" // offline bridge never opens Google
+	return buildStoreLocal(settings, mem)
 }
 
 // Tools returns tool funcs that call the real pipeline.

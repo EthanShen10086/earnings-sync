@@ -283,6 +283,10 @@ type Settings struct {
 	GoogleShareWith string
 	OTLPEndpoint    string
 	SECUserAgent    string
+	DatabaseURL     string
+	StorageMode     string // sheets-only | pg-only | dual
+	StorageFail     string // all | partial
+	MigrationsDir   string
 }
 
 func LoadSettings() Settings {
@@ -300,6 +304,10 @@ func LoadSettings() Settings {
 		GoogleShareWith: os.Getenv("GOOGLE_SHARE_WITH"),
 		OTLPEndpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		SECUserAgent:    env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		StorageMode:     env("STORAGE_MODE", "sheets-only"),
+		StorageFail:     env("STORAGE_FAIL_POLICY", "all"),
+		MigrationsDir:   os.Getenv("MIGRATIONS_DIR"),
 	}
 }
 

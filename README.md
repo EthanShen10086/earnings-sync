@@ -59,6 +59,21 @@ go run ./cmd/sheetcreate -ticker MSFT
 
 这一步要先做完 `docs/connect.md` 第 4 节。给出 `-ticker` 时，表头用这家公司的分部，并把 spreadsheet id 写回配置。服务账号建不了表时，用你自己的 Google 账号建一份同样的三张表，共享给服务账号后再把 id 写进配置。
 
+## 双写存储（Sheets + PostgreSQL）
+
+保留 Google Sheets，并增加 PostgreSQL Writer；ingest / 编排写入走同一 `sheet.Store` 抽象，可由环境变量选择：
+
+- `STORAGE_MODE=sheets-only|pg-only|dual`
+- `STORAGE_FAIL_POLICY=all|partial`
+- `DATABASE_URL=postgres://earnings:earnings@127.0.0.1:5432/earnings?sslmode=disable`
+
+```bash
+make pg-up          # deploy/docker-compose.yml 起 Postgres（Redis 用 --profile cache）
+make test           # 含双写单测；CI 会带真实 PG
+```
+
+说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。最小只读页：[apps/web](apps/web)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
+
 ## AI 编排引擎
 
 可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition）。财报 flow 通过 `pipeline_ingest` 调用真实 `pipeline.Ingest`。
@@ -89,6 +104,6 @@ curl -H 'content-type: application/json' -d '{"job_id":"<id>","instruction":"画
 
 公司在 `configs/companies.yaml`。Apple 用现有表格。Alphabet、Tesla 走 SEC，要先建表并填 spreadsheet id。SpaceX 没有公开 10-Q，只能手动传文件。Cursor 里让模型操作同一套工具时，启用 `.cursor/mcp.json` 的 `earnings-sync`，说明在 `skills/earnings-agent/SKILL.md`。
 
-HTTP 在 `:8090`。pprof 在 `127.0.0.1:8091/debug/pprof/`。指标在 `/metrics`。要看 trace，先 `cd deploy && docker compose up -d`，再把 `OTEL_EXPORTER_OTLP_ENDPOINT` 设为 `http://localhost:4318`。
+HTTP 在 `:8090`（含 `GET /v1/facts?ticker=AAPL`）。pprof 在 `127.0.0.1:8091/debug/pprof/`。指标在 `/metrics`。要看 trace：`docker compose -f deploy/docker-compose.yml --profile observe up -d`，再把 `OTEL_EXPORTER_OTLP_ENDPOINT` 设为 `http://localhost:4318`。
 
 这次实际卡住的问题记在 [docs/questions-and-ux.md](docs/questions-and-ux.md)。

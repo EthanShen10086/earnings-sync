@@ -20,6 +20,24 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: earnings
+          POSTGRES_PASSWORD: earnings
+          POSTGRES_DB: earnings
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U earnings -d earnings"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://earnings:earnings@127.0.0.1:5432/earnings?sslmode=disable
+      MIGRATIONS_DIR: migrations
+      STORAGE_MODE: dual
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

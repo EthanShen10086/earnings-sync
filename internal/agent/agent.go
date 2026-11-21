@@ -213,8 +213,8 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		if rt.DryRun {
 			return `{"dry_run":true,"would_create":true}`, "create_workbook dry_run"
 		}
-		g, ok := rt.Sheets.(*sheet.Google)
-		if !ok || g == nil {
+		g := sheet.AsGoogle(rt.Sheets)
+		if g == nil {
 			return `{"error":"google sheets client is not configured"}`, "create_workbook no client"
 		}
 		if title == "" {
@@ -246,7 +246,7 @@ func execute(ctx context.Context, rt Runtime, result *Result, call extract.ToolC
 		}
 		var n int
 		var err error
-		if g, ok := rt.Sheets.(*sheet.Google); ok {
+		if g := sheet.AsGoogle(rt.Sheets); g != nil {
 			n, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments, company.UsesMappedLayout())
 		} else {
 			n, err = rt.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
