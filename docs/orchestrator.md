@@ -1,59 +1,144 @@
 # AI 编排引擎
 
-`internal/orchestrator` 是 earnings-sync 的本地 AI 驱动程序：用 YAML 描述步骤图，按依赖调度 tool / agent / condition，支持分支、重试与错误恢复。
+`internal/orchestrator` 是 earnings-sync 的本地 AI 驱动程序：用 YAML 描述步骤图，按依赖调度 tool / agent / condition，支持分支、重试、超时、错误恢复、幂等开跑、结构化日志与产品闭环事件落盘。
 
-财报导入 flow 通过工具 `pipeline_ingest` **直接调用** `pipeline.Ingest`（与 HTTP `/ingest` 同一条能力）：拉文档 → 解析 → 勾稽 → 写表 → 通知。`dry_run=true` 只抽取；`dry_run=false` 会写入 `sheet.Store`（`cmd/orchestrate` 默认用本地 Memory，可把写入导出为 JSON 证据）。
+财报导入 flow 通过工具 `pipeline_ingest` **直接调用** `pipeline.Ingest`（与 HTTP `/ingest` 同一条能力）。
 
-## 怎么跑
+## 架构
+
+```
+cmd/orchestrate
+    │  解析 flags / 健康检查 / 打开 FileRunStore
+    ▼
+Engine  ── Observer（JSON 日志 + product events + Prometheus）
+    │
+    ├─ RunStore / FileRunStore   运行态 + 幂等键 + 落盘
+    ├─ Registry.Tools            tool 节点
+    ├─ Registry.Chatter          agent 节点（DeepSeek 或 Mock）
+    └─ FlowDefinition (YAML DAG)
+           needs / when / retry / timeoutMs / onFailure
+```
+
+| 层 | 职责 | 主要文件 |
+| --- | --- | --- |
+| 定义 | YAML DAG、输入输出声明 | `configs/flows/*.flow.yaml`, `load.go` |
+| 调度 | ready-queue、并发、跳过/失败策略 | `engine.go`, `graph.go` |
+| 执行 | tool / agent / condition runner | `runners.go`, `builtins.go`, `pipeline_bridge.go` |
+| 运行态 | RunState、幂等、落盘查询 | `runstore.go`, `filestore.go` |
+| 可观测 | request/trace id、事件、指标 | `observer.go`, `context.go`, `internal/observe` |
+| 稳定性 | 超时、重试、健康检查 | `engine.go` DefaultTimeout、`health.go` |
+
+## 怎么跑 / 验收
 
 ```bash
-# dry-run：真实解析 fixture，不写表
+# 1) 健康检查：flow 可加载、工具齐全、store 可写
+make orchestrate-check
+
+# 2) dry-run：真实解析 fixture，不写表
+make orchestrate
+# 或
 go run ./cmd/orchestrate \
   -flow configs/flows/earnings-ingest.flow.yaml \
-  -input ticker=AAPL \
-  -input dry_run=true \
-  -input body_path=testdata/aapl_2026q4.csv \
-  -input force=true
+  -input ticker=AAPL -input dry_run=true \
+  -input body_path=testdata/aapl_2026q4.csv -input force=true
 
-# 非 dry：写入 Memory sheet，并导出证据
+# 3) 非 dry：写入 Memory sheet，导出证据
 make orchestrate-live
-# 证据文件：data/orchestrator-e2e-writes.json
+# 证据：data/orchestrator-e2e-writes.json
+# 运行态：data/orchestrator-runs.json
+# 闭环事件：data/orchestrator-events.json
 
+# 4) 单测
 go test ./internal/orchestrator -count=1
 ```
 
+验收清单：
+
+- `-check` 输出 `"status":"ok"`
+- dry-run 退出码 0，stdout 中 `status=succeeded`，`ingest.dry_run=true`
+- live 写入 `orchestrator-e2e-writes.json` 含 cells；`orchestrator-events.json` 含 `flow.start` / `flow.success`
+- 同一 `-client-request-id` 再跑一次，复用同一 `run_id`
+
 接真实 DeepSeek：`-mock-model=false` 并设置 `DEEPSEEK_API_KEY`。
 
-## 参考了什么、如何取舍
+## 如何加新 tool
 
-对照本机 `/Users/ethanshen/Desktop/code/test` 里两套实现：
+1. 在 Go 里实现 `ToolFunc`，注册进 `ToolRegistry`（`BuiltinTools`、`PipelineBridge.Tools`，或 `MergeTools`）。
+2. 在 flow YAML 里加 `type: tool` 节点，设 `tool: <name>`、`input`、`needs`、可选 `retry` / `timeoutMs` / `onFailure`。
+3. 单测：直接 `Engine.Run` 或走 `cmd/orchestrate`。
+4. 若改了默认财报 flow，更新 `make orchestrate-check` 所需工具集合。
 
-| 来源 | 角色 | 对本仓库的结论 |
-| --- | --- | --- |
-| **fit-ai-plugin Flow Runtime**（`SimpleFlowEngine`） | 进程内 DAG 泵：`needs` / 并发 / agent·tool 节点 / `FlowValue` / retry·stop | **主骨架采纳**。earnings-sync 要的是「可配置地驱动模型与工具」，不是机器调度。 |
-| **ftp3_runtime_hub** | Pipeline Hub 控制面：版本化 `pipeline:` YAML、线性 `nextStep`、机器分配、Runner WS、人工确认 | **不整仓搬**。它明确废弃了 Hub 内图编排（拒绝顶层 `nodes:`），图引擎已交给插件。 |
+示例：
 
-### 从 Flow Runtime 借鉴
+```go
+tools := orchestrator.BuiltinTools()
+tools["my_tool"] = func(ctx context.Context, input any) (any, error) {
+    return map[string]any{"ok": true}, nil
+}
+```
 
-- YAML/JSON `FlowDefinition` + 节点 `type: agent|tool|condition`
-- 依赖 `needs` / `needsMode: all|any`，并发 ready-queue
-- `FlowValue`：`{from:input|node|nodes}`
-- 节点 `retry`、`onFailure: stop|continue`、`when` 条件跳过
-- 执行器注入（`Chatter` / `ToolRegistry`），引擎不直连模型厂商 API
+```yaml
+- id: step
+  type: tool
+  tool: my_tool
+  needs: [validate]
+  timeoutMs: 10000
+  retry: { maxAttempts: 2, backoffMs: 100 }
+  input:
+    ticker: { from: input, key: ticker }
+```
 
-### 从 ftp3_runtime_hub 借鉴（局部）
+## 如何加新 agent
 
-- **`client_request_id` 幂等开跑**：同一请求键复用已有 `RunState`（见 `RunStore`）
-- **定义 / 运行态 / 执行器分离**：YAML 只描述图；`RunState` 记状态；工具与模型可替换
-- **步骤声明式输入**：flow 级 `inputs` + 节点 `input` 引用
-- **失败策略显式化**：用 `onFailure` 表达
+1. 注入实现 `Chatter` 的模型（`extract.HTTPProvider` 或 `MockChatter`）。
+2. 可选：配置 `Registry.AgentTools` + `AgentToolHandler`，允许模型在节点内调工具。
+3. YAML：`type: agent`，必填 `prompt`；`input` 引用上游节点输出。
 
-### 明确不搬
+## 如何加新 flow
 
-- Runner / envproxy / 机器分配 / Workbench ACL 与回调
-- 线性 `stages → steps` 作为唯一推进方式
-- `waiting_confirm` / intervention 人工环
-- MCP/Skill 目录与 AG-UI（已有独立 `cmd/mcp` + `internal/agent`）
+1. 新建 `configs/flows/<name>.flow.yaml`。
+2. 声明 `inputs`（必填项标 `required: true`）、`nodes`、可选 `output` / `concurrency`。
+3. 用 `go run ./cmd/orchestrate -flow ... -check` 与带 `-input` 的试跑验收。
+4. 在 README / Makefile 加快捷目标（若值得一键跑）。
+
+## 如何维护
+
+| 场景 | 做法 |
+| --- | --- |
+| 查一次失败 | 读 stdout 的 `RunState`，或 `data/orchestrator-runs.json` 按 `run_id` |
+| 查产品闭环 | `data/orchestrator-events.json`：`flow.start` / `flow.success` / `flow.fail` / `step.*` |
+| 关联日志 | 每条 JSON 日志含 `request_id`、`trace_id`、`run_id` |
+| 指标 | HTTP 服务 `/metrics` 含 `earnings_flow_*`；CLI 进程内也会记 histogram（未暴露 HTTP 时仅内存） |
+| 幂等重放 | 传相同 `-client-request-id`；pipeline 层另有 job hash 幂等 |
+| 改公司/宏观 | 只改 `configs/companies.yaml` / `configs/macro.yaml`，不必改引擎 |
+
+## 故障排查
+
+| 现象 | 排查 |
+| --- | --- |
+| `缺少必填 Flow 输入` | 补 `-input key=value` |
+| `未注册工具` | `MergeTools` 是否包含该 tool；`-check` 会列出缺失 |
+| `flow 失败` + 节点 Error | 看该节点 `attempts`；检查 `retry` / `timeoutMs` / 上游输出 |
+| 超时取消 | 调大 `-timeout` 或节点 `timeoutMs`；确认 fixture/网络 |
+| dry_run 却想写表 | 设 `-input dry_run=false`；确认 dump-writes 路径 |
+| 飞书没消息 | CLI 默认 `-capture-notify=true`（不发飞书）；真发需关掉并配置 webhook |
+| 幂等未生效 | 是否传了 `-client-request-id`；`runs` 文件是否被清空 |
+| 健康检查 fail | 先 `make orchestrate-check`，按 `checks` 字段修 |
+
+## 稳定性约定
+
+- **超时**：节点 `timeoutMs`；整次 run 用 `-timeout` / `Engine.DefaultTimeout`（调用方无 deadline 时生效）。
+- **重试**：节点 `retry.maxAttempts` + `backoffMs`。
+- **失败策略**：`onFailure: stop`（默认，取消其余）或 `continue`。
+- **幂等**：`client_request_id` → 复用 `RunState`；pipeline job store 防重复写表。
+- **健康检查**：`GET` 语义的 CLI `-check` / `CheckHealth`（flow + tools + store 可写）。HTTP 服务另有 `/healthz`。
+
+## 设计取舍（摘要）
+
+对照本机 Flow Runtime 与 ftp3_runtime_hub：
+
+- **采纳**：YAML DAG、needs/并发、retry/onFailure、执行器注入、`client_request_id` 幂等。
+- **不搬**：机器舰队、Workbench ACL、线性 nextStep 唯一推进、人工确认环。
 
 ## 节点类型
 
@@ -70,3 +155,4 @@ go test ./internal/orchestrator -count=1
 - `pipeline_ingest` → `pipeline.Pipeline.Ingest`（与 `cmd/server` HTTP ingest 同源）
 - `internal/agent`：模型工具循环——可挂进编排的 `AgentToolHandler`
 - `BuiltinTools`：离线 stub，仅用于引擎单测与无 pipeline 的演示
+- HTTP `/healthz`、`/metrics`、OTLP：属于 `cmd/server` 进程；编排 CLI 复用同一套 observe 指标类型与日志字段约定

@@ -91,18 +91,21 @@ type Attempt struct {
 
 // NodeState is the runtime view of one node.
 type NodeState struct {
-	ID       string    `json:"id"`
-	Type     string    `json:"type"`
-	Title    string    `json:"title,omitempty"`
-	Status   Status    `json:"status"`
-	Attempts []Attempt `json:"attempts,omitempty"`
-	Output   any       `json:"output,omitempty"`
-	Error    string    `json:"error,omitempty"`
+	ID         string    `json:"id"`
+	Type       string    `json:"type"`
+	Title      string    `json:"title,omitempty"`
+	Status     Status    `json:"status"`
+	Attempts   []Attempt `json:"attempts,omitempty"`
+	Output     any       `json:"output,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	DurationMs int64     `json:"duration_ms,omitempty"`
 }
 
 // RunState is the snapshot of one local flow run.
 type RunState struct {
 	RunID           string                `json:"run_id"`
+	RequestID       string                `json:"request_id,omitempty"`
+	TraceID         string                `json:"trace_id,omitempty"`
 	ClientRequestID string                `json:"client_request_id,omitempty"` // hub StartFlowRun 幂等键
 	Title           string                `json:"title,omitempty"`
 	Status          Status                `json:"status"`
@@ -113,6 +116,7 @@ type RunState struct {
 	Error           string                `json:"error,omitempty"`
 	StartedAt       time.Time             `json:"started_at"`
 	EndedAt         time.Time             `json:"ended_at,omitempty"`
+	DurationMs      int64                 `json:"duration_ms,omitempty"`
 }
 
 // NodeResult is what a Runner returns.
@@ -127,12 +131,15 @@ type Runner interface {
 
 // Event is emitted as the engine advances.
 type Event struct {
-	Seq     int
-	RunID   string
-	Kind    string // node_start | node_end | run_end | log
-	NodeID  string
-	Status  Status
-	Error   string
-	Output  any
-	Message string
+	Seq        int
+	RunID      string
+	RequestID  string
+	TraceID    string
+	Kind       string // run_start | node_start | node_end | run_end | log
+	NodeID     string
+	Status     Status
+	Error      string
+	Output     any
+	Message    string
+	DurationMs int64
 }

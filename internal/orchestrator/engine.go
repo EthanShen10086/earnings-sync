@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,13 +18,20 @@ type Engine struct {
 	Events   chan Event // optional; if nil, events are discarded
 	// Runs remembers finished/in-flight runs by RunID and ClientRequestID (hub-style idempotency).
 	Runs *RunStore
+	// Observer emits structured logs, product events, and metrics (optional).
+	Observer Observer
+	// DefaultTimeout bounds the whole run when the caller context has no deadline.
+	DefaultTimeout time.Duration
 }
 
 // RunOptions configures one local execution.
 type RunOptions struct {
 	RunID           string
+	RequestID       string // correlates logs across services; auto-generated if empty
+	TraceID         string // distributed trace / local correlation; auto-generated if empty
 	ClientRequestID string // optional; same id returns the previous RunState (hub StartFlowRun idiom)
 	Inputs          map[string]any
+	Timeout         time.Duration // optional per-run override; 0 uses Engine.DefaultTimeout
 }
 
 // Run submits inputs and drives the DAG to a terminal status.
@@ -56,6 +64,21 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 	if runID == "" {
 		runID = uuid.NewString()
 	}
+	requestID, traceID := EnsureIDs(opts.RequestID, opts.TraceID)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = e.DefaultTimeout
+	}
+	runCtx := ctx
+	var cancelTimeout context.CancelFunc
+	if timeout > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			runCtx, cancelTimeout = context.WithTimeout(ctx, timeout)
+			defer cancelTimeout()
+		}
+	}
+	runCtx = WithIDs(runCtx, requestID, traceID, runID)
+
 	concurrency := def.Concurrency
 	if concurrency <= 0 {
 		concurrency = 4
@@ -63,6 +86,8 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 	graph := NewGraphIndex(def)
 	state := &RunState{
 		RunID:           runID,
+		RequestID:       requestID,
+		TraceID:         traceID,
 		ClientRequestID: opts.ClientRequestID,
 		Title:           def.Title,
 		Status:          StatusRunning,
@@ -79,13 +104,15 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 		}
 	}
 	e.Runs.Put(state)
-	e.emit(Event{Seq: bump(state), RunID: runID, Kind: "run_start", Status: StatusRunning})
+	e.emit(Event{Seq: bump(state), RunID: runID, RequestID: requestID, TraceID: traceID, Kind: "run_start", Status: StatusRunning})
+	e.observe(runCtx, slog.LevelInfo, "flow.start", "title", def.Title)
+	e.product(runCtx, ProductEvent{Name: "flow.start", RunID: runID, Status: StatusRunning, Attrs: map[string]any{"title": def.Title}})
 
 	var mu sync.Mutex
 	active := 0
 	failedStop := false
 
-	waitCtx, cancel := context.WithCancel(ctx)
+	waitCtx, cancel := context.WithCancel(runCtx)
 	defer cancel()
 
 	type doneMsg struct {
@@ -103,7 +130,8 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 		att := Attempt{No: attemptNo, Status: StatusRunning, StartedAt: time.Now()}
 		ns.Attempts = append(ns.Attempts, att)
 		active++
-		e.emit(Event{Seq: bump(state), RunID: runID, Kind: "node_start", NodeID: node.ID, Status: StatusRunning})
+		e.emit(Event{Seq: bump(state), RunID: runID, RequestID: requestID, TraceID: traceID, Kind: "node_start", NodeID: node.ID, Status: StatusRunning})
+		e.observe(waitCtx, slog.LevelInfo, "step.start", "node_id", node.ID, "type", node.Type)
 		go func(n Node, attemptIdx int) {
 			res, err := e.executeNode(waitCtx, state, n, &mu)
 			msg := doneMsg{nodeID: n.ID, attempt: Attempt{
@@ -166,6 +194,8 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 				ns.Attempts[len(ns.Attempts)-1] = msg.attempt
 			}
 			node := graph.nodesByID[msg.nodeID]
+			dur := msg.attempt.EndedAt.Sub(msg.attempt.StartedAt)
+			ns.DurationMs = dur.Milliseconds()
 			if msg.err != nil {
 				maxAttempts := 1
 				backoff := 0
@@ -188,7 +218,12 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 				}
 				ns.Status = StatusFailed
 				ns.Error = msg.err.Error()
-				e.emit(Event{Seq: bump(state), RunID: runID, Kind: "node_end", NodeID: msg.nodeID, Status: StatusFailed, Error: ns.Error})
+				e.emit(Event{Seq: bump(state), RunID: runID, RequestID: requestID, TraceID: traceID, Kind: "node_end", NodeID: msg.nodeID, Status: StatusFailed, Error: ns.Error, DurationMs: ns.DurationMs})
+				e.observe(waitCtx, slog.LevelError, "step.fail", "node_id", msg.nodeID, "type", node.Type, "duration_ms", ns.DurationMs, "error", ns.Error)
+				e.product(waitCtx, ProductEvent{Name: "step.fail", RunID: runID, NodeID: msg.nodeID, Status: StatusFailed, DurationMs: dur.Milliseconds(), Error: ns.Error})
+				if e.Observer != nil {
+					e.Observer.NodeDuration(node.Type, StatusFailed, dur)
+				}
 				onFailure := node.OnFailure
 				if onFailure == "" {
 					onFailure = "stop"
@@ -200,7 +235,12 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 			} else {
 				ns.Status = StatusSucceeded
 				ns.Output = msg.attempt.Output
-				e.emit(Event{Seq: bump(state), RunID: runID, Kind: "node_end", NodeID: msg.nodeID, Status: StatusSucceeded, Output: ns.Output})
+				e.emit(Event{Seq: bump(state), RunID: runID, RequestID: requestID, TraceID: traceID, Kind: "node_end", NodeID: msg.nodeID, Status: StatusSucceeded, Output: ns.Output, DurationMs: ns.DurationMs})
+				e.observe(waitCtx, slog.LevelInfo, "step.success", "node_id", msg.nodeID, "type", node.Type, "duration_ms", ns.DurationMs)
+				e.product(waitCtx, ProductEvent{Name: "step.success", RunID: runID, NodeID: msg.nodeID, Status: StatusSucceeded, DurationMs: dur.Milliseconds()})
+				if e.Observer != nil {
+					e.Observer.NodeDuration(node.Type, StatusSucceeded, dur)
+				}
 			}
 			mu.Unlock()
 		}
@@ -235,9 +275,10 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 	mu.Lock()
 	defer mu.Unlock()
 	state.EndedAt = time.Now()
-	if ctx.Err() != nil && !nodesAnyFailed(state) {
+	state.DurationMs = state.EndedAt.Sub(state.StartedAt).Milliseconds()
+	if runCtx.Err() != nil && !nodesAnyFailed(state) {
 		state.Status = StatusCanceled
-		state.Error = ctx.Err().Error()
+		state.Error = runCtx.Err().Error()
 	} else if nodesAnyFailed(state) {
 		state.Status = StatusFailed
 		for _, ns := range state.Nodes {
@@ -260,7 +301,22 @@ func (e *Engine) Run(ctx context.Context, def FlowDefinition, opts RunOptions) (
 		}
 	}
 	e.Runs.Put(state)
-	e.emit(Event{Seq: bump(state), RunID: runID, Kind: "run_end", Status: state.Status, Error: state.Error, Output: state.Output})
+	e.emit(Event{Seq: bump(state), RunID: runID, RequestID: requestID, TraceID: traceID, Kind: "run_end", Status: state.Status, Error: state.Error, Output: state.Output, DurationMs: state.DurationMs})
+	runDur := time.Duration(state.DurationMs) * time.Millisecond
+	if e.Observer != nil {
+		e.Observer.RunDuration(state.Status, runDur)
+	}
+	switch state.Status {
+	case StatusSucceeded:
+		e.observe(runCtx, slog.LevelInfo, "flow.success", "duration_ms", state.DurationMs)
+		e.product(runCtx, ProductEvent{Name: "flow.success", RunID: runID, Status: StatusSucceeded, DurationMs: state.DurationMs})
+	case StatusCanceled:
+		e.observe(runCtx, slog.LevelWarn, "flow.fail", "duration_ms", state.DurationMs, "error", state.Error, "canceled", true)
+		e.product(runCtx, ProductEvent{Name: "flow.fail", RunID: runID, Status: StatusCanceled, DurationMs: state.DurationMs, Error: state.Error})
+	default:
+		e.observe(runCtx, slog.LevelError, "flow.fail", "duration_ms", state.DurationMs, "error", state.Error)
+		e.product(runCtx, ProductEvent{Name: "flow.fail", RunID: runID, Status: StatusFailed, DurationMs: state.DurationMs, Error: state.Error})
+	}
 	if state.Status == StatusFailed {
 		return state, fmt.Errorf("flow 失败: %s", state.Error)
 	}
@@ -377,6 +433,20 @@ func (e *Engine) emit(ev Event) {
 	case e.Events <- ev:
 	default:
 	}
+}
+
+func (e *Engine) observe(ctx context.Context, level slog.Level, msg string, attrs ...any) {
+	if e.Observer == nil {
+		return
+	}
+	e.Observer.Log(ctx, level, msg, attrs...)
+}
+
+func (e *Engine) product(ctx context.Context, ev ProductEvent) {
+	if e.Observer == nil {
+		return
+	}
+	e.Observer.Event(ctx, ev)
 }
 
 func bump(state *RunState) int {

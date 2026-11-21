@@ -1,7 +1,10 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check
 
 test:
 	go test ./...
+
+orchestrate-check:
+	go run ./cmd/orchestrate -check
 
 orchestrate:
 	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml \

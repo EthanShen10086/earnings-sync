@@ -61,12 +61,23 @@ go run ./cmd/sheetcreate -ticker MSFT
 
 ## AI 编排引擎
 
-可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition）。财报 flow 通过 `pipeline_ingest` 调用真实 `pipeline.Ingest`。说明见 [docs/orchestrator.md](docs/orchestrator.md)。
+可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition）。财报 flow 通过 `pipeline_ingest` 调用真实 `pipeline.Ingest`。
+
+- 架构 / 扩展（新 tool·agent·flow）/ 维护 / 故障排查：[docs/orchestrator.md](docs/orchestrator.md)
+- 商用就绪评估（代码体量、可观测、闭环、差距）：见 Project 文档 `docs/commercial-readiness.md`（Agent Store）
 
 ```bash
+make orchestrate-check # 健康检查：flow + 工具 + store 可写
 make orchestrate       # fixture dry-run（真实解析，不写表）
-make orchestrate-live  # fixture 非 dry：写入 Memory 并导出 data/orchestrator-e2e-writes.json
+make orchestrate-live  # fixture 非 dry：写入 Memory；导出 writes / runs / events
 ```
+
+落盘（默认可查询）：
+
+- `data/orchestrator-runs.json` — 每次 flow 的 RunState（含 request/trace id、步骤耗时）
+- `data/orchestrator-events.json` — 产品闭环事件 `flow.start|success|fail`、`step.*`
+- `data/orchestrator-e2e-writes.json` — live 写入证据（`-dump-writes`）
+- `data/orchestrator-jobs.json` — pipeline job 幂等与分段耗时
 
 ## 其他入口
 

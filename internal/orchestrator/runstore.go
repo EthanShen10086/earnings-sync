@@ -1,6 +1,9 @@
 package orchestrator
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // RunStore is an in-process registry of runs.
 // Inspired by ftp3_runtime_hub's client_request_id idempotency, without DB/fleet.
@@ -8,6 +11,8 @@ type RunStore struct {
 	mu       sync.RWMutex
 	byID     map[string]*RunState
 	byClient map[string]string // client_request_id -> run_id
+	// OnPut is optional; called after each Put with a cloned snapshot (e.g. FileRunStore persist).
+	OnPut func(*RunState)
 }
 
 // NewRunStore creates an empty store.
@@ -24,11 +29,15 @@ func (s *RunStore) Put(state *RunState) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cp := cloneRun(state)
 	s.byID[state.RunID] = cp
 	if state.ClientRequestID != "" {
 		s.byClient[state.ClientRequestID] = state.RunID
+	}
+	hook := s.OnPut
+	s.mu.Unlock()
+	if hook != nil {
+		hook(cloneRun(state))
 	}
 }
 
@@ -62,6 +71,29 @@ func (s *RunStore) ByClientRequestID(clientID string) (*RunState, bool) {
 		return nil, false
 	}
 	return cloneRun(st), true
+}
+
+// List returns recent runs newest-first, capped at limit (default 50).
+func (s *RunStore) List(limit int) []*RunState {
+	if s == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*RunState, 0, len(s.byID))
+	for _, st := range s.byID {
+		out = append(out, cloneRun(st))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func cloneRun(in *RunState) *RunState {
