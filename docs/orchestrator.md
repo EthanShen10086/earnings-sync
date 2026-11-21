@@ -1,16 +1,24 @@
 # AI 编排引擎
 
-`internal/orchestrator` 是 earnings-sync 的本地 AI 驱动程序：用 YAML 描述步骤图，按依赖调度 tool / agent / condition，支持分支、重试与错误恢复。生产导入仍走 `cmd/server` → `pipeline.Ingest`；编排引擎是独立可配置入口， stub 工具可换成真实 sheet/notify/agent。
+`internal/orchestrator` 是 earnings-sync 的本地 AI 驱动程序：用 YAML 描述步骤图，按依赖调度 tool / agent / condition，支持分支、重试与错误恢复。
+
+财报导入 flow 通过工具 `pipeline_ingest` **直接调用** `pipeline.Ingest`（与 HTTP `/ingest` 同一条能力）：拉文档 → 解析 → 勾稽 → 写表 → 通知。`dry_run=true` 只抽取；`dry_run=false` 会写入 `sheet.Store`（`cmd/orchestrate` 默认用本地 Memory，可把写入导出为 JSON 证据）。
 
 ## 怎么跑
 
 ```bash
+# dry-run：真实解析 fixture，不写表
 go run ./cmd/orchestrate \
   -flow configs/flows/earnings-ingest.flow.yaml \
   -input ticker=AAPL \
-  -input dry_run=true
+  -input dry_run=true \
+  -input body_path=testdata/aapl_2026q4.csv \
+  -input force=true
 
-make orchestrate
+# 非 dry：写入 Memory sheet，并导出证据
+make orchestrate-live
+# 证据文件：data/orchestrator-e2e-writes.json
+
 go test ./internal/orchestrator -count=1
 ```
 
@@ -37,21 +45,21 @@ go test ./internal/orchestrator -count=1
 
 - **`client_request_id` 幂等开跑**：同一请求键复用已有 `RunState`（见 `RunStore`）
 - **定义 / 运行态 / 执行器分离**：YAML 只描述图；`RunState` 记状态；工具与模型可替换
-- **步骤声明式输入**：flow 级 `inputs` + 节点 `input` 引用（对应 Hub 的 `input_parameters` / step inputs 思路，去掉 artifact/env 舰队）
-- **失败策略显式化**：对齐 Hub `pre_hooks.on_failure` / step 终态语义，用 `onFailure` 表达
+- **步骤声明式输入**：flow 级 `inputs` + 节点 `input` 引用
+- **失败策略显式化**：用 `onFailure` 表达
 
 ### 明确不搬
 
 - Runner / envproxy / 机器分配 / Workbench ACL 与回调
-- 线性 `stages → steps` 作为唯一推进方式（财报导入需要 dry_run 分支与并行校验，DAG 更合适）
-- `waiting_confirm` / intervention 人工环（本仓库无审批台）
+- 线性 `stages → steps` 作为唯一推进方式
+- `waiting_confirm` / intervention 人工环
 - MCP/Skill 目录与 AG-UI（已有独立 `cmd/mcp` + `internal/agent`）
 
 ## 节点类型
 
 | type | 作用 |
 | --- | --- |
-| `tool` | 调用 `ToolRegistry` 中的 Go 函数 |
+| `tool` | 调用 `ToolRegistry` 中的 Go 函数（含 `pipeline_ingest`） |
 | `agent` | 调用 `Chatter`（DeepSeek 或 `MockChatter`） |
 | `condition` | 输出 `{branch, matched, value}`，配合 `when` 做分支 |
 
@@ -59,5 +67,6 @@ go test ./internal/orchestrator -count=1
 
 ## 和现有代码的关系
 
-- `internal/agent`：模型工具循环（写表/飞书）——可挂进编排的 `tool` / `AgentToolHandler`
-- `internal/pipeline`：线上导入编排（脚本化）——编排引擎是配置化的并行路径，不替换 HTTP ingest
+- `pipeline_ingest` → `pipeline.Pipeline.Ingest`（与 `cmd/server` HTTP ingest 同源）
+- `internal/agent`：模型工具循环——可挂进编排的 `AgentToolHandler`
+- `BuiltinTools`：离线 stub，仅用于引擎单测与无 pipeline 的演示

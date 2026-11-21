@@ -1,8 +1,15 @@
 // Command orchestrate runs a YAML AI flow with the local orchestration engine.
 //
-// Example:
+// Examples:
 //
-//	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml -input ticker=AAPL -input dry_run=true
+//	# dry-run（只抽取，不写表）
+//	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml \
+//	  -input ticker=AAPL -input dry_run=true -input body_path=testdata/aapl_2026q4.csv
+//
+//	# 真实写入本地 Memory sheet，并导出证据 JSON
+//	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml \
+//	  -input ticker=AAPL -input dry_run=false -input body_path=testdata/aapl_2026q4.csv \
+//	  -input force=true -dump-writes data/orchestrator-e2e-writes.json
 package main
 
 import (
@@ -12,10 +19,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
+	"github.com/EthanShen10086/earnings-sync/internal/notify"
 	"github.com/EthanShen10086/earnings-sync/internal/orchestrator"
 )
 
@@ -24,6 +33,11 @@ func main() {
 	mock := flag.Bool("mock-model", true, "用 MockChatter，不调用 DeepSeek（默认 true）")
 	verbose := flag.Bool("v", true, "打印节点事件")
 	clientReq := flag.String("client-request-id", "", "幂等键（同 ftp3_runtime_hub client_request_id）；重复调用复用结果")
+	companies := flag.String("companies", "configs/companies.yaml", "公司配置")
+	macro := flag.String("macro", "configs/macro.yaml", "宏观配置")
+	jobsPath := flag.String("jobs", "data/orchestrator-jobs.json", "job store 路径")
+	dumpWrites := flag.String("dump-writes", "", "若使用 Memory sheet，把写入单元格导出到此 JSON")
+	notifyCapture := flag.Bool("capture-notify", true, "用内存 notifier 捕获通知（不发飞书）")
 	var inputs inputFlags
 	flag.Var(&inputs, "input", "流程输入，可重复，形如 key=value（value 支持 true/false/数字/JSON）")
 	flag.Parse()
@@ -32,9 +46,26 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	reg := orchestrator.Registry{Tools: orchestrator.BuiltinTools()}
+
+	var note notify.Sender
+	if *notifyCapture {
+		note = &captureNotify{}
+	}
+	bridge, err := orchestrator.NewLocalPipeline(orchestrator.LocalPipelineOpts{
+		CompaniesFile: *companies,
+		MacroFile:     *macro,
+		JobStorePath:  *jobsPath,
+		Notifier:      note,
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	reg := orchestrator.Registry{
+		Tools: orchestrator.MergeTools(orchestrator.BuiltinTools(), bridge.Tools()),
+	}
 	if *mock {
-		reg.Chatter = orchestrator.MockChatter{Content: "样例：已完成抽取与分支判断（mock 模型）"}
+		reg.Chatter = orchestrator.MockChatter{Content: "样例：已完成 pipeline ingest（mock 模型）"}
 	} else {
 		apiKey := os.Getenv("DEEPSEEK_API_KEY")
 		base := os.Getenv("DEEPSEEK_BASE_URL")
@@ -81,6 +112,16 @@ func main() {
 	})
 	close(events)
 	<-done
+
+	if *dumpWrites != "" {
+		if dumpErr := bridge.DumpWrites(*dumpWrites); dumpErr != nil {
+			fmt.Fprintf(os.Stderr, "dump-writes: %v\n", dumpErr)
+		} else {
+			abs, _ := filepath.Abs(*dumpWrites)
+			fmt.Fprintf(os.Stderr, "wrote evidence %s (%d cells)\n", abs, len(bridge.Memory.Writes))
+		}
+	}
+
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if state != nil {
@@ -94,6 +135,13 @@ func main() {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, err.Error())
 	os.Exit(1)
+}
+
+type captureNotify struct{ n int }
+
+func (c *captureNotify) Send(context.Context, notify.Message) error {
+	c.n++
+	return nil
 }
 
 type inputFlags []string

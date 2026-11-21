@@ -50,7 +50,8 @@ func resolveRef(from string, ref map[string]any, inputs map[string]any, nodes ma
 		}
 		val, ok := inputs[key]
 		if !ok {
-			return nil, fmt.Errorf("缺少 flow 输入: %s", key)
+			// Optional inputs may be omitted; required ones are checked in Engine.Run.
+			return nil, nil
 		}
 		return dig(val, path)
 	case "node":

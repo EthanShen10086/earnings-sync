@@ -1,6 +1,6 @@
-# 最小可跑的财报导入编排示例（离线 stub 工具，不碰 Google Sheet / 飞书 / DeepSeek）。
-# 设计对齐 fit-ai-plugin Flow Runtime：YAML DAG + needs + condition/when 分支 + agent/tool 节点。
-title: earnings-ingest-demo
+# 财报导入编排：校验输入后调用真实 pipeline.Ingest（拉/解析/勾稽/写表/通知）。
+# dry_run=true 时 pipeline 只抽取不写表；dry_run=false 时写入 Sheets（本地默认 Memory）。
+title: earnings-ingest
 agent: earnings
 model: deepseek-flash
 concurrency: 2
@@ -13,9 +13,21 @@ inputs:
     type: json
     title: 是否只演练
     required: true
+  body_path:
+    type: text
+    title: 本地财报 fixture 路径
+    required: false
+  url:
+    type: text
+    title: 远端财报 URL
+    required: false
+  force:
+    type: json
+    title: 强制重跑（忽略已成功 job）
+    required: false
 output:
   from: nodes
-  nodeIds: [extract, write, notify, summarize]
+  nodeIds: [ingest, summarize]
   as: record
 nodes:
   - id: validate
@@ -29,75 +41,31 @@ nodes:
       maxAttempts: 2
       backoffMs: 50
 
-  - id: extract
+  - id: ingest
     type: tool
-    title: 抽取财季事实（stub）
-    tool: extract_facts_stub
+    title: pipeline.Ingest（真实拉/解析/写入）
+    tool: pipeline_ingest
     needs: [validate]
-    input:
-      ticker: { from: node, nodeId: validate, path: ticker }
-
-  - id: reconcile
-    type: tool
-    title: 勾稽检查（stub）
-    tool: reconcile_stub
-    needs: [extract]
-    input:
-      from: node
-      nodeId: extract
-
-  - id: decide
-    type: condition
-    title: dry_run 分支
-    needs: [validate]
-    equals: true
-    branchTrue: dry
-    branchFalse: live
-    input:
-      value: { from: node, nodeId: validate, path: dry_run }
-
-  - id: write
-    type: tool
-    title: 写入表格（仅 live）
-    tool: upsert_period_stub
-    needs: [reconcile, decide]
-    when:
-      from: node
-      nodeId: decide
-      path: branch
-      equals: live
     onFailure: stop
     input:
-      ticker: { from: node, nodeId: extract, path: ticker }
-      period: { from: node, nodeId: extract, path: period }
-      facts: { from: node, nodeId: extract, path: facts }
-
-  - id: notify
-    type: tool
-    title: 飞书通知（仅 live）
-    tool: notify_stub
-    # 不依赖 write：dry_run 时 write 会被跳过，若 needs 它会把 notify 一并跳过。
-    needs: [extract, decide]
-    when:
-      from: node
-      nodeId: decide
-      path: branch
-      equals: live
-    onFailure: continue
-    input:
-      ticker: { from: node, nodeId: extract, path: ticker }
-      period: { from: node, nodeId: extract, path: period }
-      takeaway: { from: node, nodeId: extract, path: takeaway }
+      ticker: { from: node, nodeId: validate, path: ticker }
+      dry_run: { from: node, nodeId: validate, path: dry_run }
+      body_path: { from: input, key: body_path }
+      url: { from: input, key: url }
+      force: { from: input, key: force }
+    retry:
+      maxAttempts: 2
+      backoffMs: 100
 
   - id: summarize
     type: agent
     title: 总结本轮动作
-    needs: [extract]
+    needs: [ingest]
     prompt: |
-      根据抽取结果写一句中文结论，说明 ticker、财季和是否 dry_run。
+      根据 ingest 结果写一句中文结论，说明 ticker、财季、cells 写入数、是否 dry_run。
       不要编造未提供的数字。
     input:
-      extraction: { from: node, nodeId: extract }
+      ingest: { from: node, nodeId: ingest }
       dry_run: { from: input, key: dry_run }
     retry:
       maxAttempts: 2
