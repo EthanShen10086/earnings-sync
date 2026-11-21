@@ -1,10 +1,16 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live
 
 test:
 	go test ./...
 
 orchestrate:
-	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml -input ticker=AAPL -input dry_run=true
+	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml \
+		-input ticker=AAPL -input dry_run=true -input body_path=testdata/aapl_2026q4.csv -input force=true
+
+orchestrate-live:
+	go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml \
+		-input ticker=AAPL -input dry_run=false -input body_path=testdata/aapl_2026q4.csv -input force=true \
+		-dump-writes data/orchestrator-e2e-writes.json
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')

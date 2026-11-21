@@ -61,12 +61,11 @@ go run ./cmd/sheetcreate -ticker MSFT
 
 ## AI 编排引擎
 
-可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition、依赖、分支、重试）。说明见 [docs/orchestrator.md](docs/orchestrator.md)。
+可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition）。财报 flow 通过 `pipeline_ingest` 调用真实 `pipeline.Ingest`。说明见 [docs/orchestrator.md](docs/orchestrator.md)。
 
 ```bash
-go run ./cmd/orchestrate -flow configs/flows/earnings-ingest.flow.yaml -input ticker=AAPL -input dry_run=true
-# 或
-make orchestrate
+make orchestrate       # fixture dry-run（真实解析，不写表）
+make orchestrate-live  # fixture 非 dry：写入 Memory 并导出 data/orchestrator-e2e-writes.json
 ```
 
 ## 其他入口
