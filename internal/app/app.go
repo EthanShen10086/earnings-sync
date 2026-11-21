@@ -12,6 +12,7 @@ import (
 	thttp "trpc.group/trpc-go/trpc-go/http"
 
 	"github.com/EthanShen10086/earnings-sync/internal/agent"
+	"github.com/EthanShen10086/earnings-sync/internal/auth"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/extract"
 	"github.com/EthanShen10086/earnings-sync/internal/features"
@@ -69,13 +70,21 @@ func Run() error {
 		return err
 	}
 	defer func() { _ = cleanup() }()
+	authCfg := auth.LoadConfig()
 	s := trpc.NewServer()
-	api := httpapi.API{Pipe: pipe, Obs: obs, Facts: sheet.ReaderFrom(pipe.Sheets)}
+	api := httpapi.API{
+		Pipe:   pipe,
+		Obs:    obs,
+		Facts:  sheet.ReaderFrom(pipe.Sheets),
+		Auth:   authCfg,
+		Alerts: observe.NewAlertBoard(),
+	}
 	thttp.RegisterNoProtocolServiceMux(s.Service("trpc.earnings.sync.HTTP"), api.Handler())
 	obs.Logger.Info("earnings-sync listening",
 		"http", ":8090",
 		"admin", ":8091",
 		"storage_mode", settings.StorageMode,
+		"auth_mode", authCfg.Mode,
 	)
 	for _, st := range feat.Report {
 		obs.Logger.Info("feature", "name", st.Name, "want", string(st.Want), "state", string(st.State), "detail", st.Detail)

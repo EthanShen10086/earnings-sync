@@ -37,5 +37,18 @@ services:
       - "9090:9090"
     profiles: ["observe"]
 
+  # Optional dashboard host — import deploy/grafana/dashboards/earnings-sync.json manually.
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    profiles: ["observe"]
+
 volumes:
   earnings_pg:

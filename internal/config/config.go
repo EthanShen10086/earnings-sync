@@ -287,6 +287,9 @@ type Settings struct {
 	StorageMode     string // sheets-only | pg-only | dual
 	StorageFail     string // all | partial
 	MigrationsDir   string
+	// Auth* mirrors AUTH_* for IAM/SSO placeholders (see internal/auth).
+	AuthMode        string
+	AuthBearerToken string
 }
 
 func LoadSettings() Settings {
@@ -308,6 +311,8 @@ func LoadSettings() Settings {
 		StorageMode:     env("STORAGE_MODE", "sheets-only"),
 		StorageFail:     env("STORAGE_FAIL_POLICY", "all"),
 		MigrationsDir:   os.Getenv("MIGRATIONS_DIR"),
+		AuthMode:        env("AUTH_MODE", "bypass"),
+		AuthBearerToken: os.Getenv("AUTH_BEARER_TOKEN"),
 	}
 }
 
