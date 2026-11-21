@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/EthanShen10086/earnings-sync/internal/model"
+	"golang.org/x/sync/errgroup"
 )
 
 // WriteMode selects which backends receive pipeline writes.
@@ -58,11 +59,21 @@ func ParseFailPolicy(s string) FailPolicy {
 // Transaction boundary: each backend commits independently; Dual does not
 // provide a distributed transaction. Prefer FailAll so a partial dual write
 // surfaces as an error to the caller/job.
+//
+// Concurrent Upsert/UpsertAll/ApplyCharts/UpsertMacro calls are safe when
+// backends are safe (Memory and Postgres are). FailPartial dual mode writes
+// both backends concurrently; FailAll stays sequential (sheets then PG) so a
+// sheets failure skips PG.
 type Dual struct {
 	Sheets Store
 	PG     Store
 	Mode   WriteMode
 	Fail   FailPolicy
+}
+
+type dualStep struct {
+	name  string
+	store Store
 }
 
 func (d *Dual) targets() (sheets, pg bool, err error) {
@@ -102,19 +113,24 @@ func (d *Dual) run(ctx context.Context, op string, fn writeFn) (int, error) {
 	if policy == "" {
 		policy = FailAll
 	}
-	total := 0
-	var errs []string
-	type step struct {
-		name  string
-		store Store
-	}
-	var steps []step
+	var steps []dualStep
 	if useSheets {
-		steps = append(steps, step{name: "sheets", store: d.Sheets})
+		steps = append(steps, dualStep{name: "sheets", store: d.Sheets})
 	}
 	if usePG {
-		steps = append(steps, step{name: "postgres", store: d.PG})
+		steps = append(steps, dualStep{name: "postgres", store: d.PG})
 	}
+	if len(steps) == 0 {
+		return 0, nil
+	}
+
+	// FailPartial + multiple backends: concurrent fan-out; each backend must be concurrency-safe.
+	if policy == FailPartial && len(steps) > 1 {
+		return d.runParallel(ctx, op, steps, fn)
+	}
+
+	total := 0
+	var errs []string
 	for _, st := range steps {
 		n, err := fn(ctx, st.store)
 		total += n
@@ -123,6 +139,40 @@ func (d *Dual) run(ctx context.Context, op string, fn writeFn) (int, error) {
 			if policy == FailAll {
 				return total, fmt.Errorf("%s via %s: %w", op, st.name, err)
 			}
+		}
+	}
+	if len(errs) > 0 {
+		return total, fmt.Errorf("%s partial failures: %s", op, strings.Join(errs, "; "))
+	}
+	return total, nil
+}
+
+func (d *Dual) runParallel(ctx context.Context, op string, steps []dualStep, fn writeFn) (int, error) {
+	type result struct {
+		name string
+		n    int
+		err  error
+	}
+	results := make([]result, len(steps))
+	g, gctx := errgroup.WithContext(ctx)
+	for i := range steps {
+		i := i
+		st := steps[i]
+		g.Go(func() error {
+			n, err := fn(gctx, st.store)
+			results[i] = result{name: st.name, n: n, err: err}
+			// Never cancel siblings under FailPartial.
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	total := 0
+	var errs []string
+	for _, r := range results {
+		total += r.n
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", r.name, r.err))
 		}
 	}
 	if len(errs) > 0 {
