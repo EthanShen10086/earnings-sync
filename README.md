@@ -73,9 +73,13 @@ make infra-up       # 可选：Redis + NATS；缺省时应用降级到 memory，
 make test           # 含双写与 infra 降级单测；CI 会带真实 PG
 ```
 
-说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。Jobs/runs 跨进程幂等：[docs/jobs-runs-pg.md](docs/jobs-runs-pg.md)。Feature flags / 降级：[docs/feature-flags.md](docs/feature-flags.md)。数据面占位（缓存/MQ/对象存储/CDN/网关/审计/搜索/k8s）：[docs/infra.md](docs/infra.md)。最小只读页：[apps/web](apps/web)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
+说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。Jobs/runs 跨进程幂等：[docs/jobs-runs-pg.md](docs/jobs-runs-pg.md)。Feature flags / 降级：[docs/feature-flags.md](docs/feature-flags.md)。数据面占位（缓存/MQ/对象存储/CDN/网关/审计/搜索/k8s）：[docs/infra.md](docs/infra.md)。只读页骨架（表格/i18n/主题）：[apps/web](apps/web)。稳定 API 契约与 IAM 占位：[docs/api-contract.md](docs/api-contract.md)。可观测/告警接线占位：[docs/observability.md](docs/observability.md)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
 
 无 Google / LLM / 飞书密钥时仍可跑最小链路；`STORAGE_MODE=dual` 且无 PG 时软降级为 Memory。Redis/MQ/Kafka 等高级能力由 `FEATURE_*` 开关，关或依赖缺失则 noop；`internal/infra` 另提供可拨号 adapters 与 compose/k8s 骨架。
+
+## 鉴权占位（无密钥）
+
+默认 `AUTH_MODE=bypass`：每个受保护请求注入本地 Principal。公开 `GET /v1/meta`、`GET /v1/auth/providers`；受保护 `GET /v1/auth/me`、`GET /v1/facts`、`GET /v1/ops/alerts` 等。`bearer` / `oidc` 仅占位形状，见契约文档。
 
 ## AI 编排引擎
 

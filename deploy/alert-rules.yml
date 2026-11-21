@@ -1,0 +1,29 @@
+# Prometheus alert rule stubs for earnings-sync.
+# Not loaded by default compose — wire into Prometheus when you own on-call.
+groups:
+  - name: earnings-sync-stubs
+    rules:
+      - alert: EarningsIngestLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(earnings_job_duration_seconds_bucket[5m])) by (le)) > 60
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Ingest p95 latency high (stub)"
+          description: "Wire to /v1/ops/alerts or your pager when leaving stub mode."
+
+      - alert: EarningsNotifyFailures
+        expr: increase(earnings_notify_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Feishu notify failures detected (stub)"
+
+      - alert: EarningsReconcileWarnings
+        expr: increase(earnings_reconcile_warnings_total[30m]) > 3
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Reconcile warnings elevated (stub)"

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/EthanShen10086/earnings-sync/internal/auth"
 	"github.com/EthanShen10086/earnings-sync/internal/infra"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
@@ -13,29 +14,39 @@ import (
 	"github.com/EthanShen10086/earnings-sync/internal/sheet"
 )
 
+// APIContractVersion is the stable JSON contract revision for /v1/*.
+const APIContractVersion = "2026-11-21.1"
+
 // API is the HTTP surface of the tRPC service.
 type API struct {
-	Pipe  *pipeline.Pipeline
-	Obs   *observe.Obs
-	Facts sheet.Reader // optional; Postgres or Memory readback for apps/web
-	Infra *infra.Stack // optional data-plane adapters (cache/mq/objects/audit/search)
+	Pipe   *pipeline.Pipeline
+	Obs    *observe.Obs
+	Facts  sheet.Reader // optional; Postgres or Memory readback for apps/web
+	Auth   auth.Config
+	Alerts *observe.AlertBoard
+	Infra  *infra.Stack // optional data-plane adapters (cache/mq/objects/audit/search)
 }
 
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.Handle("GET /metrics", a.Obs.MetricsHandler())
+	mux.HandleFunc("GET /v1/meta", a.meta)
+	mux.HandleFunc("GET /v1/auth/me", a.authMe)
+	mux.HandleFunc("GET /v1/auth/providers", a.authProviders)
+	mux.HandleFunc("GET /v1/ops/alerts", a.listAlerts)
+	mux.HandleFunc("OPTIONS /v1/ops/alerts", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/auth/me", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/auth/providers", optionsOK)
+	mux.HandleFunc("OPTIONS /v1/meta", optionsOK)
 	mux.HandleFunc("POST /v1/ingest", a.ingest)
 	mux.HandleFunc("POST /v1/watch", a.watch)
 	mux.HandleFunc("POST /v1/charts/recommend", a.recommend)
 	mux.HandleFunc("POST /v1/charts/apply", a.apply)
 	mux.HandleFunc("GET /v1/jobs/{id}", a.getJob)
 	mux.HandleFunc("GET /v1/facts", a.listFacts)
-	mux.HandleFunc("OPTIONS /v1/facts", func(w http.ResponseWriter, r *http.Request) {
-		cors(w)
-		w.WriteHeader(http.StatusNoContent)
-	})
-	h := http.Handler(mux)
+	mux.HandleFunc("OPTIONS /v1/facts", optionsOK)
+	h := auth.Middleware(a.authConfig(), mux)
 	if a.Infra != nil && a.Infra.Gateway != nil {
 		h = a.Infra.Gateway.Middleware(h)
 	}
@@ -51,8 +62,73 @@ func (a API) healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+func (a API) authConfig() auth.Config {
+	if a.Auth.Mode != "" {
+		return a.Auth
+	}
+	return auth.LoadConfig()
+}
+
+func (a API) meta(w http.ResponseWriter, r *http.Request) {
+	cfg := a.authConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"api_version":  APIContractVersion,
+		"service":      "earnings-sync",
+		"auth_mode":    cfg.Mode,
+		"storage_hint": "STORAGE_MODE=sheets-only|pg-only|dual",
+		"docs":         []string{"docs/api-contract.md", "docs/observability.md"},
+		"endpoints": []map[string]string{
+			{"method": "GET", "path": "/healthz", "auth": "public"},
+			{"method": "GET", "path": "/metrics", "auth": "public"},
+			{"method": "GET", "path": "/v1/meta", "auth": "public"},
+			{"method": "GET", "path": "/v1/auth/providers", "auth": "public"},
+			{"method": "GET", "path": "/v1/auth/me", "auth": "required"},
+			{"method": "GET", "path": "/v1/facts", "auth": "required", "query": "ticker"},
+			{"method": "GET", "path": "/v1/jobs/{id}", "auth": "required"},
+			{"method": "POST", "path": "/v1/ingest", "auth": "required"},
+			{"method": "GET", "path": "/v1/ops/alerts", "auth": "required"},
+		},
+		"capabilities": map[string]bool{
+			"facts_read":      true,
+			"ingest_write":    true,
+			"auth_bypass":     cfg.Mode == auth.ModeBypass,
+			"auth_bearer":     cfg.Mode == auth.ModeBearer,
+			"auth_oidc_stub":  cfg.Mode == auth.ModeOIDC,
+			"ops_alerts_stub": true,
+			"otel_optional":   true,
+		},
+	})
+}
+
+func (a API) authMe(w http.ResponseWriter, r *http.Request) {
+	p, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, errStringError("unauthenticated"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"principal": p})
+}
+
+func (a API) authProviders(w http.ResponseWriter, r *http.Request) {
+	cfg := a.authConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":      cfg.Mode,
+		"providers": cfg.Providers(),
+	})
+}
+
+func (a API) listAlerts(w http.ResponseWriter, r *http.Request) {
+	board := a.Alerts
+	if board == nil {
+		board = observe.NewAlertBoard()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alerts": board.List(),
+		"note":   "Local stub board; see deploy/alert-rules.yml and docs/observability.md",
+	})
+}
+
 func (a API) listFacts(w http.ResponseWriter, r *http.Request) {
-	cors(w)
 	reader := a.Facts
 	if reader == nil && a.Pipe != nil {
 		reader = sheet.ReaderFrom(a.Pipe.Sheets)
@@ -69,13 +145,25 @@ func (a API) listFacts(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []sheet.FactRow{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"facts": rows})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"facts": rows,
+		"meta": map[string]any{
+			"api_version": APIContractVersion,
+			"count":       len(rows),
+			"ticker":      r.URL.Query().Get("ticker"),
+		},
+	})
+}
+
+func optionsOK(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func cors(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 }
 
 type errStringError string
@@ -199,6 +287,7 @@ func readIngest(r *http.Request) (pipeline.Request, error) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	cors(w)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-API-Version", APIContractVersion)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }

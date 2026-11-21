@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EthanShen10086/earnings-sync/internal/auth"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/job"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
@@ -29,7 +30,7 @@ func TestListFacts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	api := API{Obs: observe.New(), Facts: mem}
+	api := API{Obs: observe.New(), Facts: mem, Auth: auth.Config{Mode: auth.ModeBypass, DevSubject: "t", DevRoles: []string{"reader"}}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/facts?ticker=AAPL", nil)
 	rec := httptest.NewRecorder()
 	api.Handler().ServeHTTP(rec, req)
@@ -38,12 +39,42 @@ func TestListFacts(t *testing.T) {
 	}
 	var out struct {
 		Facts []sheet.FactRow `json:"facts"`
+		Meta  map[string]any  `json:"meta"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out.Facts) == 0 {
 		t.Fatal("expected facts")
+	}
+	if out.Meta["api_version"] != APIContractVersion {
+		t.Fatalf("meta %#v", out.Meta)
+	}
+}
+
+func TestMetaAndAuthMe(t *testing.T) {
+	api := API{
+		Obs:  observe.New(),
+		Auth: auth.Config{Mode: auth.ModeBypass, DevSubject: "dev", DevEmail: "d@local", DevRoles: []string{"admin"}, DevTenant: "local"},
+	}
+	h := api.Handler()
+	metaReq := httptest.NewRequest(http.MethodGet, "/v1/meta", nil)
+	metaRec := httptest.NewRecorder()
+	h.ServeHTTP(metaRec, metaReq)
+	if metaRec.Code != http.StatusOK || !bytes.Contains(metaRec.Body.Bytes(), []byte(APIContractVersion)) {
+		t.Fatalf("meta %d %s", metaRec.Code, metaRec.Body.String())
+	}
+	meReq := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+	meRec := httptest.NewRecorder()
+	h.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK || !bytes.Contains(meRec.Body.Bytes(), []byte(`"dev"`)) {
+		t.Fatalf("me %d %s", meRec.Code, meRec.Body.String())
+	}
+	alertsReq := httptest.NewRequest(http.MethodGet, "/v1/ops/alerts", nil)
+	alertsRec := httptest.NewRecorder()
+	h.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK || !bytes.Contains(alertsRec.Body.Bytes(), []byte(`"alerts"`)) {
+		t.Fatalf("alerts %d %s", alertsRec.Code, alertsRec.Body.String())
 	}
 }
 
@@ -61,7 +92,8 @@ func TestIngestAndGetJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := API{
-		Obs: observe.New(),
+		Obs:  observe.New(),
+		Auth: auth.Config{Mode: auth.ModeBypass, DevSubject: "t", DevRoles: []string{"admin"}},
 		Pipe: &pipeline.Pipeline{
 			Companies: reg,
 			Jobs:      store,

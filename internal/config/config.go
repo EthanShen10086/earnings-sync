@@ -300,6 +300,10 @@ type Settings struct {
 	RateLimitRPS    float64
 	RateLimitBurst  int
 	InfraStrict     bool
+
+	// Auth* mirrors AUTH_* for IAM/SSO placeholders (see internal/auth).
+	AuthMode        string
+	AuthBearerToken string
 }
 
 func LoadSettings() Settings {
@@ -330,6 +334,8 @@ func LoadSettings() Settings {
 		RateLimitRPS:    envFloat("RATE_LIMIT_RPS", 0),
 		RateLimitBurst:  envInt("RATE_LIMIT_BURST", 20),
 		InfraStrict:     envBool("INFRA_STRICT", false),
+		AuthMode:        env("AUTH_MODE", "bypass"),
+		AuthBearerToken: os.Getenv("AUTH_BEARER_TOKEN"),
 	}
 }
 
