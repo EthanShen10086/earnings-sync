@@ -4,13 +4,13 @@
 
 服务入口仍是仓库根目录 `cmd/server`（monorepo 边界说明见 `apps/api`）。无真实 Google/LLM/IdP 密钥时可演示：`AUTH_MODE=bypass` + Memory/PG 读回。
 
-## 鉴权（IAM / SSO 占位）
+## 鉴权（IAM / SSO）
 
 | `AUTH_MODE` | 行为 |
 | --- | --- |
 | `bypass`（默认） | 每个受保护请求注入本地 `Principal`（`AUTH_DEV_*`） |
 | `bearer` | 需要 `Authorization: Bearer <AUTH_BEARER_TOKEN>` |
-| `oidc` | **仅接口形状**；未接真实 IdP 前会 401，演示请用 bypass |
+| `oidc` | JWT 形 stub：校验 `sub`/`iss`/`aud`（不验签）；无真实 JWKS 也可跑通，见 [stub-credentials.md](stub-credentials.md) |
 
 公开路径（不鉴权）：`/healthz`、`/metrics`、`/v1/meta`、`/v1/auth/providers`、所有 `OPTIONS`。
 
@@ -18,6 +18,8 @@
 
 - `GET /v1/auth/providers` → `{ mode, providers[] }`
 - `GET /v1/auth/me` → `{ principal: { sub, email, name, roles, tenant, source } }`
+- `GET /v1/platform/status` → feature flags + infra 状态
+- `GET /v1/search?q=` / `GET /v1/audit` — 需 `FEATURE_SEARCH` / `FEATURE_AUDIT` 开启
 
 ## 读写契约
 
@@ -40,9 +42,11 @@
       "unit": ""
     }
   ],
-  "meta": { "api_version": "2026-11-21.1", "count": 1, "ticker": "AAPL" }
+  "meta": { "api_version": "2026-11-21.1", "count": 1, "ticker": "AAPL", "cache_hit": false }
 }
 ```
+
+`FEATURE_REDIS=1` 时 ingest 后再次查询可出现 `"cache_hit": true`（内存或 Redis）。
 
 ### 写 / 任务
 
@@ -70,9 +74,9 @@ AUTH_DEV_NAME=Dev Bypass
 AUTH_DEV_ROLES=admin,reader
 AUTH_DEV_TENANT=local
 AUTH_BEARER_TOKEN=        # bearer 模式必填
-AUTH_OIDC_ISSUER=         # oidc 占位
+AUTH_OIDC_ISSUER=         # oidc stub：claims.iss 须匹配（可空则不校验）
 AUTH_OIDC_CLIENT_ID=
-AUTH_OIDC_AUDIENCE=
+AUTH_OIDC_AUDIENCE=       # claims.aud 须匹配（可空则不校验）
 ```
 
 ## 前端

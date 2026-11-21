@@ -1,5 +1,6 @@
-// Package auth provides IAM/SSO placeholders for the HTTP API.
+// Package auth provides IAM/SSO for the HTTP API.
 // Default AUTH_MODE=bypass keeps demos runnable without real IdP secrets.
+// AUTH_MODE=oidc accepts JWT-shaped stub tokens (claim validation) without JWKS.
 package auth
 
 import (
@@ -15,7 +16,7 @@ type contextKey struct{}
 const (
 	ModeBypass = "bypass" // local/dev: inject a synthetic principal
 	ModeBearer = "bearer" // shared static token (demo secret)
-	ModeOIDC   = "oidc"   // placeholder shape only; rejects until wired
+	ModeOIDC   = "oidc"   // JWT-shaped stub (or live later); validates claims locally
 )
 
 // Principal is the caller identity attached to the request context.
@@ -37,7 +38,7 @@ type Config struct {
 	DevRoles    []string
 	DevTenant   string
 	BearerToken string
-	// OIDC placeholders — shape only; unused in bypass/bearer.
+	// OIDC stub / future IdP settings.
 	OIDCIssuer   string
 	OIDCClientID string
 	OIDCAudience string
@@ -86,11 +87,13 @@ func (c Config) Providers() []map[string]any {
 			"id":          "oidc",
 			"type":        "oidc",
 			"enabled":     c.Mode == ModeOIDC,
-			"ready":       oidcReady,
+			"ready":       true, // stub always runnable; oidcReady notes live IdP fields
+			"stub":        true,
+			"live_ready":  oidcReady,
 			"issuer":      c.OIDCIssuer,
 			"client_id":   c.OIDCClientID,
 			"audience":    c.OIDCAudience,
-			"description": "OIDC/SSO placeholder — wire real IdP before production",
+			"description": "OIDC stub: Bearer JWT (header.payload.sig); validates sub/iss/aud locally without JWKS",
 		},
 	}
 }
@@ -136,11 +139,43 @@ func Authenticate(cfg Config, r *http.Request) (Principal, error) {
 			Source:  ModeBearer,
 		}, nil
 	case ModeOIDC:
-		// Shape reserved for future OIDC code exchange / JWT validation.
-		if bearerToken(r) == "" {
-			return Principal{}, errAuth("oidc mode requires Authorization Bearer (not wired; use AUTH_MODE=bypass for demos)")
+		tok := bearerToken(r)
+		if tok == "" {
+			return Principal{}, errAuth("oidc mode requires Authorization: Bearer <jwt>")
 		}
-		return Principal{}, errAuth("oidc validation not implemented; set AUTH_MODE=bypass or bearer")
+		claims, err := parseStubOIDC(tok)
+		if err != nil {
+			return Principal{}, err
+		}
+		if cfg.OIDCIssuer != "" && claims.Iss != "" && claims.Iss != cfg.OIDCIssuer {
+			return Principal{}, errAuth("oidc stub iss mismatch")
+		}
+		if cfg.OIDCIssuer != "" && claims.Iss == "" {
+			return Principal{}, errAuth("oidc stub claims.iss required when AUTH_OIDC_ISSUER set")
+		}
+		if !claims.audienceOK(cfg.OIDCAudience) {
+			return Principal{}, errAuth("oidc stub aud mismatch")
+		}
+		roles := claims.Roles
+		if len(roles) == 0 {
+			roles = append([]string(nil), cfg.DevRoles...)
+		}
+		email := claims.Email
+		if email == "" {
+			email = cfg.DevEmail
+		}
+		name := claims.Name
+		if name == "" {
+			name = cfg.DevName
+		}
+		return Principal{
+			Subject: claims.Sub,
+			Email:   email,
+			Name:    name,
+			Roles:   roles,
+			Tenant:  cfg.DevTenant,
+			Source:  ModeOIDC,
+		}, nil
 	default: // bypass
 		return Principal{
 			Subject: cfg.DevSubject,

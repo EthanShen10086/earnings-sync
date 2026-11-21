@@ -89,6 +89,7 @@ func Run() error {
 		Auth:   authCfg,
 		Alerts: observe.NewAlertBoard(),
 		Infra:  stack,
+		Feat:   feat,
 	}
 	thttp.RegisterNoProtocolServiceMux(s.Service("trpc.earnings.sync.HTTP"), api.Handler())
 	obs.Logger.Info("earnings-sync listening",
@@ -140,15 +141,21 @@ func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipelin
 	obs := observe.New()
 	var model extract.Provider
 	var chatter agent.Chatter
-	if feat.UseLLM() && settings.ModelAPIKey != "" {
-		provider := extract.HTTPProvider{
-			NameStr: "deepseek",
-			BaseURL: settings.ModelBaseURL,
-			APIKey:  settings.ModelAPIKey,
-			Model:   settings.ModelName,
+	if feat.UseLLM() {
+		if feat.LiveLLM() && settings.ModelAPIKey != "" {
+			provider := extract.HTTPProvider{
+				NameStr: "deepseek",
+				BaseURL: settings.ModelBaseURL,
+				APIKey:  settings.ModelAPIKey,
+				Model:   settings.ModelName,
+			}
+			model = provider
+			chatter = provider
+		} else {
+			model = extract.StubProvider{}
+			chatter = &extract.StubChatter{}
+			obs.Logger.Info("llm stub provider active", "reason", "FEATURE_LLM on without DEEPSEEK_API_KEY")
 		}
-		model = provider
-		chatter = provider
 	}
 	built, err := BuildStoreDetailed(context.Background(), settings, feat)
 	if err != nil {
@@ -183,8 +190,13 @@ func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipelin
 		return err2
 	}
 	var sender notify.Sender
-	if feat.UseNotify() && settings.FeishuWebhook != "" {
-		sender = notify.Feishu{Webhook: settings.FeishuWebhook, Secret: settings.FeishuSecret}
+	if feat.UseNotify() {
+		if feat.LiveNotify() && settings.FeishuWebhook != "" {
+			sender = notify.Feishu{Webhook: settings.FeishuWebhook, Secret: settings.FeishuSecret}
+		} else {
+			sender = &notify.Memory{}
+			obs.Logger.Info("notify stub active", "reason", "FEATURE_NOTIFY on without FEISHU_WEBHOOK_URL")
+		}
 	}
 	return &pipeline.Pipeline{
 		Companies:    reg,

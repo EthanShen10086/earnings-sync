@@ -74,10 +74,50 @@ func TestPublicPathsSkipAuth(t *testing.T) {
 	}
 }
 
-func TestOIDCStubRejects(t *testing.T) {
+func TestOIDCStubRejectsMissingToken(t *testing.T) {
 	cfg := Config{Mode: ModeOIDC}
 	_, err := Authenticate(cfg, httptest.NewRequest(http.MethodGet, "/v1/facts", nil))
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestOIDCStubAcceptsJWTShape(t *testing.T) {
+	cfg := Config{
+		Mode:         ModeOIDC,
+		OIDCIssuer:   "https://issuer.test",
+		OIDCAudience: "earnings-sync",
+		DevRoles:     []string{"reader"},
+		DevTenant:    "local",
+	}
+	tok := MintStubOIDCToken(map[string]any{
+		"sub":   "oidc-user-1",
+		"email": "u@example.com",
+		"name":  "OIDC Stub",
+		"iss":   "https://issuer.test",
+		"aud":   "earnings-sync",
+		"roles": []string{"admin"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/facts", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	p, err := Authenticate(cfg, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Subject != "oidc-user-1" || p.Source != ModeOIDC || p.Email != "u@example.com" {
+		t.Fatalf("principal %+v", p)
+	}
+	if len(p.Roles) != 1 || p.Roles[0] != "admin" {
+		t.Fatalf("roles %+v", p.Roles)
+	}
+}
+
+func TestOIDCStubRejectsBadAud(t *testing.T) {
+	cfg := Config{Mode: ModeOIDC, OIDCAudience: "expected"}
+	tok := MintStubOIDCToken(map[string]any{"sub": "x", "aud": "other"})
+	req := httptest.NewRequest(http.MethodGet, "/v1/facts", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	if _, err := Authenticate(cfg, req); err == nil {
+		t.Fatal("expected aud mismatch")
 	}
 }

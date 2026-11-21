@@ -7,24 +7,25 @@ import (
 	"time"
 )
 
-// Cache is an optional Redis-shaped hot-read / lock placeholder.
+// Cache is an optional Redis-shaped hot-read / lock (in-process when remote missing).
 type Cache interface {
 	Get(ctx context.Context, key string) (string, bool, error)
 	Set(ctx context.Context, key, value string, ttl time.Duration) error
 }
 
-// Queue is a lightweight MQ placeholder (async notify / retry).
+// Queue is a lightweight MQ (async notify / retry) with real enqueue + length.
 type Queue interface {
 	Enqueue(ctx context.Context, topic string, payload []byte) error
 	Len(topic string) int
 }
 
-// EventBus is a Kafka-shaped publish placeholder.
+// EventBus is a Kafka-shaped publish bus that retains events for verification.
 type EventBus interface {
 	Publish(ctx context.Context, topic string, key string, payload []byte) error
+	Len() int
 }
 
-// ObjectStore holds filing blobs (dev bucket placeholder).
+// ObjectStore holds filing blobs (memory/dev bucket).
 type ObjectStore interface {
 	Put(ctx context.Context, key string, body []byte) error
 	Get(ctx context.Context, key string) ([]byte, bool, error)
@@ -36,7 +37,7 @@ type Auditor interface {
 	Len() int
 }
 
-// Searcher is a compliance / fact search placeholder.
+// Searcher indexes and finds documents when FEATURE_SEARCH is on.
 type Searcher interface {
 	Index(ctx context.Context, id, text string) error
 	Find(ctx context.Context, query string) ([]string, error)
@@ -59,6 +60,7 @@ func (NoopQueue) Len(string) int                                { return 0 }
 type NoopBus struct{}
 
 func (NoopBus) Publish(context.Context, string, string, []byte) error { return nil }
+func (NoopBus) Len() int                                              { return 0 }
 
 type NoopObjects struct{}
 
@@ -81,9 +83,14 @@ func (NoopSearch) Find(context.Context, string) ([]string, error) {
 
 // --- in-process adapters when flag on + dep placeholder present ---
 
+type memEntry struct {
+	value string
+	exp   time.Time
+}
+
 type MemoryCache struct {
 	mu   sync.Mutex
-	data map[string]string
+	data map[string]memEntry
 }
 
 func (c *MemoryCache) Get(_ context.Context, key string) (string, bool, error) {
@@ -92,17 +99,28 @@ func (c *MemoryCache) Get(_ context.Context, key string) (string, bool, error) {
 	if c.data == nil {
 		return "", false, nil
 	}
-	v, ok := c.data[key]
-	return v, ok, nil
+	e, ok := c.data[key]
+	if !ok {
+		return "", false, nil
+	}
+	if !e.exp.IsZero() && time.Now().After(e.exp) {
+		delete(c.data, key)
+		return "", false, nil
+	}
+	return e.value, true, nil
 }
 
-func (c *MemoryCache) Set(_ context.Context, key, value string, _ time.Duration) error {
+func (c *MemoryCache) Set(_ context.Context, key, value string, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.data == nil {
-		c.data = map[string]string{}
+		c.data = map[string]memEntry{}
 	}
-	c.data[key] = value
+	var exp time.Time
+	if ttl > 0 {
+		exp = time.Now().Add(ttl)
+	}
+	c.data[key] = memEntry{value: value, exp: exp}
 	return nil
 }
 
@@ -144,6 +162,12 @@ func (b *MemoryBus) Publish(_ context.Context, topic, key string, payload []byte
 		Payload    []byte
 	}{Topic: topic, Key: key, Payload: append([]byte(nil), payload...)})
 	return nil
+}
+
+func (b *MemoryBus) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.events)
 }
 
 type MemoryObjects struct {
