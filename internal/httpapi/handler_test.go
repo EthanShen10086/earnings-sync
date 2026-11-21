@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -12,10 +13,39 @@ import (
 
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/job"
+	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
 	"github.com/EthanShen10086/earnings-sync/internal/pipeline"
 	"github.com/EthanShen10086/earnings-sync/internal/sheet"
 )
+
+func TestListFacts(t *testing.T) {
+	mem := &sheet.Memory{}
+	v := 119.6
+	if _, err := mem.Upsert(context.Background(), "wb", model.Extraction{
+		Ticker: "AAPL",
+		Period: model.Period{FiscalYear: 2026, FiscalQuarter: 4},
+		Facts:  []model.Fact{{LineItem: "total_revenue", Value: &v}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := API{Obs: observe.New(), Facts: mem}
+	req := httptest.NewRequest(http.MethodGet, "/v1/facts?ticker=AAPL", nil)
+	rec := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Facts []sheet.FactRow `json:"facts"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Facts) == 0 {
+		t.Fatal("expected facts")
+	}
+}
 
 func TestIngestAndGetJob(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "aapl_2026q4.csv"))

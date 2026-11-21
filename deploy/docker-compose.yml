@@ -1,12 +1,41 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: earnings
+      POSTGRES_PASSWORD: earnings
+      POSTGRES_DB: earnings
+    ports:
+      - "5432:5432"
+    volumes:
+      - earnings_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U earnings -d earnings"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Placeholder only — not wired into the app this round (P1 cache/session).
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    profiles: ["cache"]
+
   jaeger:
     image: jaegertracing/all-in-one:1.57
     ports:
       - "16686:16686"
       - "4318:4318"
+    profiles: ["observe"]
+
   prometheus:
     image: prom/prometheus:v2.54.1
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
+    profiles: ["observe"]
+
+volumes:
+  earnings_pg:

@@ -67,6 +67,10 @@ func main() {
 		MacroFile:     *macro,
 		JobStorePath:  *jobsPath,
 		Notifier:      note,
+		// Opt-in dual/pg for CLI when env is set; tests leave these empty → Memory only.
+		StorageMode:   os.Getenv("STORAGE_MODE"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		MigrationsDir: os.Getenv("MIGRATIONS_DIR"),
 	})
 	if err != nil {
 		fatal(err)

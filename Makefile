@@ -1,7 +1,17 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web
 
 test:
 	go test ./...
+
+pg-up:
+	docker compose -f deploy/docker-compose.yml up -d postgres
+
+pg-test:
+	@test -n "$$DATABASE_URL" || (echo 'set DATABASE_URL first'; exit 1)
+	go test ./internal/store/postgres ./internal/sheet -count=1
+
+web:
+	cd apps/web && python3 -m http.server 5173 --bind 127.0.0.1
 
 orchestrate-check:
 	go run ./cmd/orchestrate -check

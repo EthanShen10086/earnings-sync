@@ -9,12 +9,14 @@ import (
 	"github.com/EthanShen10086/earnings-sync/internal/model"
 	"github.com/EthanShen10086/earnings-sync/internal/observe"
 	"github.com/EthanShen10086/earnings-sync/internal/pipeline"
+	"github.com/EthanShen10086/earnings-sync/internal/sheet"
 )
 
 // API is the HTTP surface of the tRPC service.
 type API struct {
-	Pipe *pipeline.Pipeline
-	Obs  *observe.Obs
+	Pipe  *pipeline.Pipeline
+	Obs   *observe.Obs
+	Facts sheet.Reader // optional; Postgres or Memory readback for apps/web
 }
 
 func (a API) Handler() http.Handler {
@@ -28,8 +30,44 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/charts/recommend", a.recommend)
 	mux.HandleFunc("POST /v1/charts/apply", a.apply)
 	mux.HandleFunc("GET /v1/jobs/{id}", a.getJob)
+	mux.HandleFunc("GET /v1/facts", a.listFacts)
+	mux.HandleFunc("OPTIONS /v1/facts", func(w http.ResponseWriter, r *http.Request) {
+		cors(w)
+		w.WriteHeader(http.StatusNoContent)
+	})
 	return mux
 }
+
+func (a API) listFacts(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	reader := a.Facts
+	if reader == nil && a.Pipe != nil {
+		reader = sheet.ReaderFrom(a.Pipe.Sheets)
+	}
+	if reader == nil {
+		writeErr(w, http.StatusServiceUnavailable, errStringError("fact reader unavailable (set STORAGE_MODE=pg-only|dual with DATABASE_URL, or use Memory store)"))
+		return
+	}
+	rows, err := reader.ListFacts(r.Context(), r.URL.Query().Get("ticker"))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	if rows == nil {
+		rows = []sheet.FactRow{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"facts": rows})
+}
+
+func cors(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+type errStringError string
+
+func (e errStringError) Error() string { return string(e) }
 
 func (a API) ingest(w http.ResponseWriter, r *http.Request) {
 	req, err := readIngest(r)
@@ -146,6 +184,7 @@ func readIngest(r *http.Request) (pipeline.Request, error) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	cors(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)

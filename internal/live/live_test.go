@@ -71,10 +71,11 @@ func TestLiveApple2026Q4(t *testing.T) {
 	t.Setenv("COMPANIES_FILE", filepath.Join(root, "configs", "companies.yaml"))
 	t.Setenv("JOB_STORE_PATH", filepath.Join(root, "data", "jobs.json"))
 	settings := config.LoadSettings()
-	pipe, _, err := app.Build(settings)
+	pipe, _, cleanup, err := app.Build(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = cleanup() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 170*time.Second)
 	defer cancel()
 	filing, ok, err := acquire.LatestFinancials(ctx, nil, "", "0000320193", settings.SECUserAgent, 9)

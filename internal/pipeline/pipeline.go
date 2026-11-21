@@ -184,7 +184,7 @@ func (p *Pipeline) runScripted(ctx context.Context, company config.Company, doc 
 			j.Cells = n
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
-			if g, ok := p.Sheets.(*sheet.Google); ok {
+			if g := sheet.AsGoogle(p.Sheets); g != nil {
 				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments, company.UsesMappedLayout())
 			} else {
 				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
@@ -277,7 +277,7 @@ func (p *Pipeline) runPrepared(ctx context.Context, company config.Company, doc 
 			j.Cells = n
 			p.Obs.Cells.Add(float64(n))
 			j.SheetURL = company.SheetURL()
-			if g, ok := p.Sheets.(*sheet.Google); ok {
+			if g := sheet.AsGoogle(p.Sheets); g != nil {
 				_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts), company.Segments, company.UsesMappedLayout())
 			} else {
 				_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, ruleCharts(j.Charts))
@@ -407,7 +407,7 @@ func (p *Pipeline) Apply(ctx context.Context, jobID, instruction string, rules b
 	if company.SpreadsheetID == "" || p.Sheets == nil {
 		return specs, fmt.Errorf("Google 表格还没接上。先运行 go run ./cmd/doctor")
 	}
-	if g, ok := p.Sheets.(*sheet.Google); ok {
+	if g := sheet.AsGoogle(p.Sheets); g != nil {
 		_, err = g.ApplyCompanyCharts(ctx, company.SpreadsheetID, specs, company.Segments, company.UsesMappedLayout())
 	} else {
 		_, err = p.Sheets.ApplyCharts(ctx, company.SpreadsheetID, specs)
