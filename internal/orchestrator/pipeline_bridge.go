@@ -30,6 +30,11 @@ type LocalPipelineOpts struct {
 	MacroFile     string
 	JobStorePath  string
 	Notifier      notify.Sender
+	// StorageMode / DatabaseURL opt into PG dual-write. Empty StorageMode keeps Memory-only
+	// so unit tests are not affected by process-wide STORAGE_MODE from CI/.env.
+	StorageMode   string
+	DatabaseURL   string
+	MigrationsDir string
 }
 
 // NewLocalPipeline builds a Pipeline that parses fixtures and writes through sheet.Memory.
@@ -65,14 +70,18 @@ func NewLocalPipeline(opts LocalPipelineOpts) (*PipelineBridge, error) {
 	}
 	mem := &sheet.Memory{}
 	sheets := sheet.Store(mem)
-	settings := config.LoadSettings()
-	mode := sheet.ParseWriteMode(settings.StorageMode)
-	if mode == sheet.ModeDual || mode == sheet.ModePGOnly {
-		built, cleanup, err := buildOfflineStore(settings, mem)
+	mode := sheet.ParseWriteMode(opts.StorageMode)
+	if opts.StorageMode != "" && (mode == sheet.ModeDual || mode == sheet.ModePGOnly) {
+		built, cleanup, err := buildStoreLocal(config.Settings{
+			StorageMode:   opts.StorageMode,
+			DatabaseURL:   opts.DatabaseURL,
+			MigrationsDir: opts.MigrationsDir,
+			StorageFail:   "all",
+		}, mem)
 		if err != nil {
 			return nil, err
 		}
-		_ = cleanup // closed by process exit; tests should use sheets-only
+		_ = cleanup // closed by process exit
 		sheets = built
 	}
 	pipe := &pipeline.Pipeline{
@@ -84,13 +93,6 @@ func NewLocalPipeline(opts LocalPipelineOpts) (*PipelineBridge, error) {
 		Obs:       observe.New(),
 	}
 	return &PipelineBridge{Pipe: pipe, Memory: mem}, nil
-}
-
-func buildOfflineStore(settings config.Settings, mem *sheet.Memory) (sheet.Store, func() error, error) {
-	// Reuse app.BuildStore semantics without importing app (avoids pulling tRPC into tests awkwardly).
-	// Sheets side stays Memory when Google creds are absent.
-	settings.GoogleCreds = "" // offline bridge never opens Google
-	return buildStoreLocal(settings, mem)
 }
 
 // Tools returns tool funcs that call the real pipeline.

@@ -35,9 +35,10 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     env:
+      # Available for postgres package tests; do not set STORAGE_MODE globally
+      # (orchestrator unit tests stay Memory-only unless opted in).
       DATABASE_URL: postgres://earnings:earnings@127.0.0.1:5432/earnings?sslmode=disable
       MIGRATIONS_DIR: migrations
-      STORAGE_MODE: dual
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

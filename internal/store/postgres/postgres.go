@@ -63,22 +63,33 @@ func (s *Store) migrationsDir() (string, error) {
 	if s.MigrationsDir != "" {
 		return s.MigrationsDir, nil
 	}
-	candidates := []string{
-		"migrations",
-		filepath.Join("..", "migrations"),
-		filepath.Join("..", "..", "migrations"),
-		filepath.Join("..", "..", "..", "migrations"),
-	}
-	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && st.IsDir() {
-			abs, err := filepath.Abs(c)
-			if err != nil {
-				return c, nil
-			}
-			return abs, nil
+	if dir := os.Getenv("MIGRATIONS_DIR"); dir != "" {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return filepath.Abs(dir)
 		}
+		return "", fmt.Errorf("MIGRATIONS_DIR=%s is not a directory", dir)
 	}
-	return "", fmt.Errorf("migrations directory not found (set MIGRATIONS_DIR)")
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	dir := cwd
+	for {
+		candidate := filepath.Join(dir, "migrations")
+		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return candidate, nil
+			}
+			// Prefer a migrations/ that sits next to go.mod; still accept the first hit.
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("migrations directory not found (set MIGRATIONS_DIR); cwd=%s", cwd)
 }
 
 // Migrate applies SQL files under migrations/ in name order, once each.
