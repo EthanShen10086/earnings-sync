@@ -61,8 +61,8 @@ func (s StubProvider) Complete(_ context.Context, system, user string) (string, 
 
 // StubChatter implements tool-calling without a remote model: it finishes with a short note.
 type StubChatter struct {
-	mu       sync.Mutex
-	Calls    int
+	mu        sync.Mutex
+	Calls     int
 	LastTools []string
 }
 
