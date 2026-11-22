@@ -73,7 +73,7 @@ make infra-up       # 可选：Redis + NATS；缺省时应用降级到 memory，
 make test           # 含双写与 infra 降级单测；CI 会带真实 PG
 ```
 
-说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。Jobs/runs 跨进程幂等：[docs/jobs-runs-pg.md](docs/jobs-runs-pg.md)。Feature flags / 降级：[docs/feature-flags.md](docs/feature-flags.md)。数据面占位（缓存/MQ/对象存储/CDN/网关/审计/搜索/k8s）：[docs/infra.md](docs/infra.md)。商用运维面（ORM/多租户/灰度/湖仓/SLA/HITL + Docker/K8s）：[docs/commercial-ops.md](docs/commercial-ops.md)。Monorepo（`apps/` + `packages/`）：[docs/monorepo.md](docs/monorepo.md)。只读页（表格/i18n/主题/存储并存条）：[apps/web](apps/web)。iOS/Android 骨架：[docs/mobile.md](docs/mobile.md)。Sheets+PG/API 并存验收：[docs/coexistence-acceptance.md](docs/coexistence-acceptance.md)。稳定 API 契约与 IAM 占位：[docs/api-contract.md](docs/api-contract.md)。可观测/告警接线占位：[docs/observability.md](docs/observability.md)。平台愿景分期见 Project store `docs/platform-roadmap.md`。
+说明与验收步骤：[docs/dual-write.md](docs/dual-write.md)。Jobs/runs 跨进程幂等：[docs/jobs-runs-pg.md](docs/jobs-runs-pg.md)。Feature flags / 降级：[docs/feature-flags.md](docs/feature-flags.md)。数据面占位（缓存/MQ/对象存储/CDN/网关/审计/搜索/k8s）：[docs/infra.md](docs/infra.md)。商用运维面（ORM/多租户/灰度/湖仓/SLA/HITL + Docker/K8s）：[docs/commercial-ops.md](docs/commercial-ops.md)。Monorepo（`apps/` + `packages/`）：[docs/monorepo.md](docs/monorepo.md)。只读页（表格/i18n/主题/存储并存条）：[apps/web](apps/web)。iOS/Android 骨架：[docs/mobile.md](docs/mobile.md)。Sheets+PG/API 并存验收：[docs/coexistence-acceptance.md](docs/coexistence-acceptance.md)。稳定 API 契约与 IAM 占位：[docs/api-contract.md](docs/api-contract.md)。可观测/告警接线占位：[docs/observability.md](docs/observability.md)。平台愿景分期见 [docs/platform-roadmap.md](docs/platform-roadmap.md)。
 
 ```bash
 make docker-build   # 构建 earnings-sync:local
@@ -91,7 +91,7 @@ make k8s-validate   # 校验 deploy/k8s（无真实集群也可）
 可配置的本地 Flow Runtime（YAML DAG：tool / agent / condition）。财报 flow 通过 `pipeline_ingest` 调用真实 `pipeline.Ingest`。
 
 - 架构 / 扩展（新 tool·agent·flow）/ 维护 / 故障排查：[docs/orchestrator.md](docs/orchestrator.md)
-- 商用就绪评估（代码体量、可观测、闭环、差距）：见 Project 文档 `docs/commercial-readiness.md`（Agent Store）
+- 商用就绪评估（代码体量、可观测、闭环、差距）：见 [docs/commercial-readiness.md](docs/commercial-readiness.md)
 
 ```bash
 make orchestrate-check # 健康检查：flow + 工具 + store 可写
