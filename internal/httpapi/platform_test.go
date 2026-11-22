@@ -38,11 +38,15 @@ func TestIngestRunsPlatformSideEffectsWithStubs(t *testing.T) {
 	}
 	dir := t.TempDir()
 	stack, err := infra.Open(context.Background(), config.Settings{
-		ObjectStoreDir:  filepath.Join(dir, "obj"),
-		AuditLogPath:    filepath.Join(dir, "audit.jsonl"),
-		SearchIndexPath: filepath.Join(dir, "search"),
-		RateLimitRPS:    100,
-		RateLimitBurst:  20,
+		ObjectStoreDir:   filepath.Join(dir, "obj"),
+		AuditLogPath:     filepath.Join(dir, "audit.jsonl"),
+		SearchIndexPath:  filepath.Join(dir, "search"),
+		RateLimitRPS:     100,
+		RateLimitBurst:   20,
+		KafkaEventLog:    filepath.Join(dir, "kafka.jsonl"),
+		LogShipperPath:   filepath.Join(dir, "logs", "app.jsonl"),
+		DiscoveryBackend: "memory",
+		AlertRulesPath:   filepath.Join("..", "..", "deploy", "alert-rules.yml"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +60,8 @@ func TestIngestRunsPlatformSideEffectsWithStubs(t *testing.T) {
 		ObjectStorage: features.WantOn,
 		Audit:         features.WantOn,
 		Search:        features.WantOn,
+		Discovery:     features.WantOn,
+		ELK:           features.WantOn,
 	}, features.Deps{}) // no remote URLs → degraded runnable stubs
 
 	delivered := make(chan string, 1)
@@ -118,8 +124,15 @@ func TestIngestRunsPlatformSideEffectsWithStubs(t *testing.T) {
 	if _, ok, err := stack.Cache.Get(context.Background(), "facts:AAPL"); err != nil || !ok {
 		t.Fatalf("cache miss after ingest: ok=%v err=%v", ok, err)
 	}
-	if feat.Bus.Len() == 0 {
+	if stack.Kafka == nil || stack.Kafka.Len() == 0 {
 		t.Fatal("kafka stub bus empty")
+	}
+	if stack.Shipper == nil || stack.Shipper.Status().Sent < 1 {
+		t.Fatal("elk shipper did not record ingest log")
+	}
+	inst, err := stack.Discovery.Discover(context.Background(), "earnings-sync")
+	if err != nil || len(inst) == 0 {
+		t.Fatalf("discovery empty: %v %+v", err, inst)
 	}
 
 	rc, _, err := stack.Objects.Get(context.Background(), "filings/AAPL/aapl_2026q4.csv")

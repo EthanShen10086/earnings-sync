@@ -14,8 +14,23 @@ import (
 	"github.com/EthanShen10086/earnings-sync/internal/adapters/search"
 	"github.com/EthanShen10086/earnings-sync/internal/auth"
 	"github.com/EthanShen10086/earnings-sync/internal/model"
+	"github.com/EthanShen10086/earnings-sync/internal/observability"
 	"github.com/EthanShen10086/earnings-sync/internal/pipeline"
 )
+
+func observabilityLog(ticker, jobID, status string) observability.LogEvent {
+	return observability.LogEvent{
+		Timestamp: time.Now().UTC(),
+		Level:     "info",
+		Message:   "ingest",
+		Service:   "earnings-sync",
+		Fields: map[string]string{
+			"ticker": ticker,
+			"job_id": jobID,
+			"status": status,
+		},
+	}
+}
 
 // afterWrite runs pluggable platform side-effects when the matching FEATURE_* is active.
 // Missing remote backends already degraded inside infra.Stack to memory/file — this still executes.
@@ -83,11 +98,21 @@ func (a API) afterWrite(ctx context.Context, actor string, req pipeline.Request,
 	}
 
 	if a.featActive("kafka") {
-		// features.Bus is the in-process Kafka stub when FEATURE_KAFKA is on.
-		if a.Feat.Bus != nil {
-			payload, _ := json.Marshal(map[string]string{"job_id": id, "ticker": ticker})
+		payload, _ := json.Marshal(map[string]string{"job_id": id, "ticker": ticker})
+		if a.Infra != nil && a.Infra.Kafka != nil {
+			_ = a.Infra.Kafka.Publish(ctx, "earnings.ingest", ticker, payload)
+		} else if a.Feat.Bus != nil {
 			_ = a.Feat.Bus.Publish(ctx, "earnings.ingest", ticker, payload)
 		}
+	}
+
+	if a.featActive("elk") && a.Infra != nil && a.Infra.Shipper != nil {
+		_ = a.Infra.Shipper.Ship(ctx, observabilityLog(ticker, id, string(job.Status)))
+	}
+
+	if a.featActive("discovery") && a.Infra != nil && a.Infra.Discovery != nil {
+		// Touch registry so status stays warm; instances already registered at Open.
+		_, _ = a.Infra.Discovery.Discover(ctx, "earnings-sync")
 	}
 }
 
@@ -162,6 +187,8 @@ func (a API) platformStatus(w http.ResponseWriter, r *http.Request) {
 			"object_storage": a.featActive("object_storage"),
 			"audit":          a.featActive("audit"),
 			"search":         a.featActive("search"),
+			"discovery":      a.featActive("discovery"),
+			"elk":            a.featActive("elk"),
 			"llm":            a.Feat.UseLLM(),
 			"notify":         a.Feat.UseNotify(),
 			"llm_live":       a.Feat.LiveLLM(),
@@ -174,8 +201,26 @@ func (a API) platformStatus(w http.ResponseWriter, r *http.Request) {
 		if a.Infra.Gateway != nil {
 			body["gateway"] = a.Infra.Gateway.Stats()
 		}
-	}
-	if a.featActive("kafka") && a.Feat.Bus != nil {
+		if a.Infra.Kafka != nil {
+			body["kafka_events"] = a.Infra.Kafka.Len()
+			body["kafka_backend"] = a.Infra.Kafka.Backend()
+		}
+		if a.featActive("discovery") && a.Infra.Discovery != nil {
+			svcs, _ := a.Infra.Discovery.ListServices(r.Context())
+			inst, _ := a.Infra.Discovery.Discover(r.Context(), "earnings-sync")
+			body["discovery"] = map[string]any{
+				"backend":   a.Infra.Discovery.Backend(),
+				"services":  svcs,
+				"instances": inst,
+			}
+		}
+		if a.Infra.Shipper != nil {
+			body["shipper"] = a.Infra.Shipper.Status()
+		}
+		if len(a.Infra.AlertRules) > 0 {
+			body["alert_rules"] = a.Infra.AlertRules
+		}
+	} else if a.featActive("kafka") && a.Feat.Bus != nil {
 		body["kafka_events"] = a.Feat.Bus.Len()
 	}
 	writeJSON(w, http.StatusOK, body)

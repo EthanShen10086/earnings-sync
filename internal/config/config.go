@@ -301,6 +301,15 @@ type Settings struct {
 	RateLimitBurst  int
 	InfraStrict     bool
 
+	// Discovery / Kafka / ELK (placeholders OK when empty).
+	DiscoveryBackend string // memory | nacos | consul | eureka
+	DiscoveryURL     string
+	KafkaBrokers     string
+	KafkaEventLog    string // file bus path when no broker
+	LogShipperPath   string
+	ElasticsearchURL string
+	AlertRulesPath   string
+
 	// Auth* mirrors AUTH_* for IAM/SSO placeholders (see internal/auth).
 	AuthMode        string
 	AuthBearerToken string
@@ -309,34 +318,50 @@ type Settings struct {
 func LoadSettings() Settings {
 	LoadDotEnv(".env")
 	return Settings{
-		CompaniesFile:   env("COMPANIES_FILE", "configs/companies.yaml"),
-		MacroFile:       env("MACRO_FILE", "configs/macro.yaml"),
-		JobStorePath:    env("JOB_STORE_PATH", "data/jobs.json"),
-		ModelAPIKey:     os.Getenv("DEEPSEEK_API_KEY"),
-		ModelBaseURL:    env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-		ModelName:       env("DEEPSEEK_MODEL", "deepseek-flash"),
-		FeishuWebhook:   os.Getenv("FEISHU_WEBHOOK_URL"),
-		FeishuSecret:    os.Getenv("FEISHU_WEBHOOK_SECRET"),
-		GoogleCreds:     os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		GoogleShareWith: os.Getenv("GOOGLE_SHARE_WITH"),
-		OTLPEndpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		SECUserAgent:    env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		StorageMode:     env("STORAGE_MODE", "sheets-only"),
-		StorageFail:     env("STORAGE_FAIL_POLICY", "all"),
-		MigrationsDir:   os.Getenv("MIGRATIONS_DIR"),
-		RedisURL:        os.Getenv("REDIS_URL"),
-		NATSURL:         os.Getenv("NATS_URL"),
-		ObjectStoreDir:  env("OBJECT_STORE_DIR", "data/objects"),
-		CDNBaseURL:      os.Getenv("CDN_BASE_URL"),
-		AuditLogPath:    env("AUDIT_LOG_PATH", "data/audit.jsonl"),
-		SearchIndexPath: env("SEARCH_INDEX_PATH", "data/search"),
-		RateLimitRPS:    envFloat("RATE_LIMIT_RPS", 0),
-		RateLimitBurst:  envInt("RATE_LIMIT_BURST", 20),
-		InfraStrict:     envBool("INFRA_STRICT", false),
-		AuthMode:        env("AUTH_MODE", "bypass"),
-		AuthBearerToken: os.Getenv("AUTH_BEARER_TOKEN"),
+		CompaniesFile:    env("COMPANIES_FILE", "configs/companies.yaml"),
+		MacroFile:        env("MACRO_FILE", "configs/macro.yaml"),
+		JobStorePath:     env("JOB_STORE_PATH", "data/jobs.json"),
+		ModelAPIKey:      os.Getenv("DEEPSEEK_API_KEY"),
+		ModelBaseURL:     env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		ModelName:        env("DEEPSEEK_MODEL", "deepseek-flash"),
+		FeishuWebhook:    os.Getenv("FEISHU_WEBHOOK_URL"),
+		FeishuSecret:     os.Getenv("FEISHU_WEBHOOK_SECRET"),
+		GoogleCreds:      os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		GoogleShareWith:  os.Getenv("GOOGLE_SHARE_WITH"),
+		OTLPEndpoint:     os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		SECUserAgent:     env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		StorageMode:      env("STORAGE_MODE", "sheets-only"),
+		StorageFail:      env("STORAGE_FAIL_POLICY", "all"),
+		MigrationsDir:    os.Getenv("MIGRATIONS_DIR"),
+		RedisURL:         os.Getenv("REDIS_URL"),
+		NATSURL:          os.Getenv("NATS_URL"),
+		ObjectStoreDir:   env("OBJECT_STORE_DIR", "data/objects"),
+		CDNBaseURL:       os.Getenv("CDN_BASE_URL"),
+		AuditLogPath:     env("AUDIT_LOG_PATH", "data/audit.jsonl"),
+		SearchIndexPath:  env("SEARCH_INDEX_PATH", "data/search"),
+		RateLimitRPS:     envFloat("RATE_LIMIT_RPS", 0),
+		RateLimitBurst:   envInt("RATE_LIMIT_BURST", 20),
+		InfraStrict:      envBool("INFRA_STRICT", false),
+		DiscoveryBackend: env("DISCOVERY_BACKEND", "memory"),
+		DiscoveryURL:     firstNonEmpty(os.Getenv("DISCOVERY_URL"), os.Getenv("NACOS_ADDR"), os.Getenv("CONSUL_HTTP_ADDR"), os.Getenv("EUREKA_URL")),
+		KafkaBrokers:     os.Getenv("KAFKA_BROKERS"),
+		KafkaEventLog:    env("KAFKA_EVENT_LOG", "data/kafka-events.jsonl"),
+		LogShipperPath:   env("LOG_SHIPPER_PATH", "data/logs/app.jsonl"),
+		ElasticsearchURL: firstNonEmpty(os.Getenv("ELASTICSEARCH_URL"), os.Getenv("ES_URL")),
+		AlertRulesPath:   env("ALERT_RULES_PATH", "deploy/alert-rules.yml"),
+		AuthMode:         env("AUTH_MODE", "bypass"),
+		AuthBearerToken:  os.Getenv("AUTH_BEARER_TOKEN"),
 	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // LoadDotEnv reads KEY=VALUE lines. Existing environment variables win.

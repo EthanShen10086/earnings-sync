@@ -1,4 +1,4 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up observe-up elk-up
 
 test:
 	go test ./...
@@ -9,6 +9,15 @@ pg-up:
 # Optional Redis (+ NATS via mq profile). App degrades if these are down.
 infra-up:
 	docker compose -f deploy/docker-compose.yml --profile cache --profile mq up -d
+
+# Prometheus (+ alert rules) / Grafana / Jaeger
+observe-up:
+	docker compose -f deploy/docker-compose.yml --profile observe up -d
+
+# Elasticsearch + Kibana + Filebeat (app also ships to data/logs without this)
+elk-up:
+	mkdir -p data/logs
+	docker compose -f deploy/docker-compose.yml --profile elk up -d
 
 pg-test:
 	@test -n "$$DATABASE_URL" || (echo 'set DATABASE_URL first'; exit 1)

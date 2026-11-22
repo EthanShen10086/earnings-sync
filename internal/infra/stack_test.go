@@ -14,21 +14,28 @@ import (
 	"github.com/EthanShen10086/earnings-sync/internal/adapters/search"
 	"github.com/EthanShen10086/earnings-sync/internal/config"
 	"github.com/EthanShen10086/earnings-sync/internal/infra"
+	"github.com/EthanShen10086/earnings-sync/internal/observability"
 )
 
 func TestOpenDegradesWithoutBackends(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	settings := config.Settings{
-		RedisURL:        "127.0.0.1:1", // closed port
-		NATSURL:         "127.0.0.1:1",
-		ObjectStoreDir:  filepath.Join(dir, "obj"),
-		AuditLogPath:    filepath.Join(dir, "audit.jsonl"),
-		SearchIndexPath: filepath.Join(dir, "search"),
-		CDNBaseURL:      "https://cdn.example.test",
-		RateLimitRPS:    10,
-		RateLimitBurst:  2,
-		InfraStrict:     false,
+		RedisURL:         "127.0.0.1:1", // closed port
+		NATSURL:          "127.0.0.1:1",
+		ObjectStoreDir:   filepath.Join(dir, "obj"),
+		AuditLogPath:     filepath.Join(dir, "audit.jsonl"),
+		SearchIndexPath:  filepath.Join(dir, "search"),
+		CDNBaseURL:       "https://cdn.example.test",
+		RateLimitRPS:     10,
+		RateLimitBurst:   2,
+		InfraStrict:      false,
+		DiscoveryBackend: "nacos",
+		DiscoveryURL:     "",
+		KafkaBrokers:     "127.0.0.1:1",
+		KafkaEventLog:    filepath.Join(dir, "kafka.jsonl"),
+		LogShipperPath:   filepath.Join(dir, "logs", "app.jsonl"),
+		AlertRulesPath:   filepath.Join("..", "..", "deploy", "alert-rules.yml"),
 	}
 	stack, err := infra.Open(ctx, settings)
 	if err != nil {
@@ -107,6 +114,25 @@ func TestOpenDegradesWithoutBackends(t *testing.T) {
 	if !stack.Gateway.Allow("1.1.1.1") {
 		t.Fatal("first request should pass")
 	}
+	if stack.Status.Discovery.Backend != "nacos-memory" {
+		t.Fatalf("discovery=%+v", stack.Status.Discovery)
+	}
+	inst, err := stack.Discovery.Discover(ctx, "earnings-sync")
+	if err != nil || len(inst) != 1 {
+		t.Fatalf("self-register: %v %+v", err, inst)
+	}
+	if err := stack.Kafka.Publish(ctx, "t", "k", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if stack.Kafka.Len() != 1 {
+		t.Fatal("kafka file bus")
+	}
+	if stack.Status.AlertRules < 1 {
+		t.Fatalf("alert rules not loaded: %d", stack.Status.AlertRules)
+	}
+	if err := stack.Shipper.Ship(ctx, observability.LogEvent{Level: "info", Message: "stack-test"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestOpenStrictFailsOnBadRedis(t *testing.T) {
@@ -141,9 +167,12 @@ func TestOpenUnconfiguredMinimumPath(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	stack, err := infra.Open(ctx, config.Settings{
-		ObjectStoreDir:  filepath.Join(dir, "obj"),
-		AuditLogPath:    filepath.Join(dir, "a.jsonl"),
-		SearchIndexPath: filepath.Join(dir, "s"),
+		ObjectStoreDir:   filepath.Join(dir, "obj"),
+		AuditLogPath:     filepath.Join(dir, "a.jsonl"),
+		SearchIndexPath:  filepath.Join(dir, "s"),
+		KafkaEventLog:    filepath.Join(dir, "kafka.jsonl"),
+		LogShipperPath:   filepath.Join(dir, "app.jsonl"),
+		DiscoveryBackend: "memory",
 	})
 	if err != nil {
 		t.Fatal(err)

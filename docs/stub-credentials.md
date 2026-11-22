@@ -31,16 +31,21 @@ FEATURE_KAFKA=1
 FEATURE_OBJECT_STORAGE=1
 FEATURE_AUDIT=1
 FEATURE_SEARCH=1
+FEATURE_DISCOVERY=1
+FEATURE_ELK=1
 FEATURE_LLM=1          # 无 DEEPSEEK_API_KEY → stub-llm
 FEATURE_NOTIFY=1       # 无 FEISHU_WEBHOOK_URL → memory notifier
 FEATURE_SHEETS_GOOGLE=auto
 AUTH_MODE=oidc
 AUTH_OIDC_ISSUER=https://issuer.local
 AUTH_OIDC_AUDIENCE=earnings-sync
-# 下面仍可留空：REDIS_URL / MQ_URL / KAFKA_BROKERS / OBJECT_STORAGE_* / DATABASE_URL
+# 下面仍可留空：REDIS_URL / MQ_URL / KAFKA_BROKERS / OBJECT_STORAGE_* / DATABASE_URL / DISCOVERY_URL / ELASTICSEARCH_URL
 OBJECT_STORE_DIR=data/objects
 AUDIT_LOG_PATH=data/audit.jsonl
 SEARCH_INDEX_PATH=data/search
+KAFKA_EVENT_LOG=data/kafka-events.jsonl
+LOG_SHIPPER_PATH=data/logs/app.jsonl
+DISCOVERY_BACKEND=nacos
 RATE_LIMIT_RPS=50
 RATE_LIMIT_BURST=20
 ```
@@ -59,14 +64,17 @@ Authorization: Bearer <header.payload.sig>
 | --- | --- |
 | Redis / cache | 内存 Get/Set + TTL；ingest 后 `facts` 带 `cache_hit` |
 | MQ | 内存 Publish/Subscribe 投递 |
-| Kafka | 进程内 EventBus 留存事件 |
+| Kafka | memory/file EventBus（`KAFKA_EVENT_LOG`）；有 broker 则 stub 客户端 |
+| Discovery | Nacos/Consul/Eureka 接口；无集群 → 内存注册表 + 自注册 |
+| ELK | JSONL shipper；可选 ES；compose profile `elk` |
 | Object storage | 本地目录 Put/Get |
 | Audit | 文件/PG Append + `GET /v1/audit` |
 | Search | 文件/PG Upsert + `GET /v1/search?q=` |
 | LLM | `extract.StubProvider` 返回可解码 JSON |
 | Notify | `notify.Memory` 记录 Send |
-| Gateway | token-bucket 计数 `allowed/rejected` |
+| Gateway | token-bucket + 路由表；`allowed/rejected` 计数 |
 | OIDC | JWT 形 Bearer → Principal |
+| Prometheus rules | `deploy/alert-rules.yml` 可加载进 compose Prometheus + `/v1/ops/alerts` |
 
 关高级能力（`FEATURE_*=0`）→ 对应路径回 noop / 跳过副作用，最小 ingest→store→query 仍可用。
 
