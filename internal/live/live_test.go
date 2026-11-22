@@ -71,7 +71,7 @@ func TestLiveApple2026Q4(t *testing.T) {
 	t.Setenv("COMPANIES_FILE", filepath.Join(root, "configs", "companies.yaml"))
 	t.Setenv("JOB_STORE_PATH", filepath.Join(root, "data", "jobs.json"))
 	settings := config.LoadSettings()
-	pipe, _, cleanup, err := app.Build(settings)
+	pipe, _, _, cleanup, err := app.Build(settings)
 	if err != nil {
 		t.Fatal(err)
 	}

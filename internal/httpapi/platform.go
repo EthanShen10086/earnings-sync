@@ -179,7 +179,9 @@ func (a API) auditHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a API) platformStatus(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{
-		"features": a.Feat.Report,
+		"api_version": APIContractVersion,
+		"storage":     a.storagePayload(),
+		"features":    a.Feat.Report,
 		"active": map[string]bool{
 			"redis":          a.featActive("redis"),
 			"mq":             a.featActive("mq"),

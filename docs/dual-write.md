@@ -54,7 +54,7 @@ curl -F ticker=AAPL -F force=true -F file=@testdata/aapl_2026q4.csv http://127.0
 curl 'http://127.0.0.1:8090/v1/facts?ticker=AAPL'
 ```
 
-前端：见 [apps/web/README.md](../apps/web/README.md)。
+前端：见 [apps/web/README.md](../apps/web/README.md)。Sheets + PG/API **并存验收清单**：[coexistence-acceptance.md](./coexistence-acceptance.md)。
 
 编排 CLI 同样读 `STORAGE_MODE` / `DATABASE_URL`；默认仍是 Memory `sheets-only`。
 

@@ -5,3 +5,9 @@ bin/
 *.exe
 coverage.out
 .worktrees/
+packages/swift-api-client/.build/
+apps/mobile-android/.gradle/
+apps/mobile-android/**/build/
+apps/mobile-android/local.properties
+*.xcuserstate
+xcuserdata/

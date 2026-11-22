@@ -2,7 +2,7 @@
 
 契约版本：`2026-11-22.1`（响应头 `X-API-Version`，以及 `GET /v1/meta`）。商用控制面见 [commercial-ops.md](commercial-ops.md)。
 
-服务入口仍是仓库根目录 `cmd/server`（monorepo 边界说明见 `apps/api`）。无真实 Google/LLM/IdP 密钥时可演示：`AUTH_MODE=bypass` + Memory/PG 读回。
+服务入口仍是仓库根目录 `cmd/server`（monorepo 边界说明见 `apps/api` / [`docs/monorepo.md`](./monorepo.md)）。无真实 Google/LLM/IdP 密钥时可演示：`AUTH_MODE=bypass` + Memory/PG 读回。
 
 ## 鉴权（IAM / SSO）
 
@@ -18,9 +18,26 @@
 
 - `GET /v1/auth/providers` → `{ mode, providers[] }`
 - `GET /v1/auth/me` → `{ principal: { sub, email, name, roles, tenant, source } }`
-- `GET /v1/platform/status` → feature flags + infra + commercial 摘要
+- `GET /v1/platform/status` → feature flags + **storage 快照** + infra + commercial 摘要
 - `GET /v1/search?q=` / `GET /v1/audit` — 需 `FEATURE_SEARCH` / `FEATURE_AUDIT` 开启
 - `GET /v1/commercial/status` · tenants / canary / hitl / lakehouse / sla — 见 [commercial-ops.md](commercial-ops.md)
+
+### 存储并存快照
+
+`GET /v1/meta` 与 `GET /v1/platform/status` 均含：
+
+```json
+"storage": {
+  "want_mode": "dual",
+  "mode": "dual",
+  "fail_policy": "all",
+  "sheets_kind": "memory",
+  "pg_kind": "postgres",
+  "notes": []
+}
+```
+
+用于 Web / iOS / Android 展示「Sheets 旧链路 + PG」并存状态。验收见 [coexistence-acceptance.md](./coexistence-acceptance.md)。OpenAPI lite：`packages/api-types/openapi-lite.json`。
 
 ## 读写契约
 
@@ -43,7 +60,7 @@
       "unit": ""
     }
   ],
-  "meta": { "api_version": "2026-11-21.1", "count": 1, "ticker": "AAPL", "cache_hit": false }
+  "meta": { "api_version": "2026-11-22.1", "count": 1, "ticker": "AAPL", "cache_hit": false }
 }
 ```
 
@@ -80,6 +97,10 @@ AUTH_OIDC_CLIENT_ID=
 AUTH_OIDC_AUDIENCE=       # claims.aud 须匹配（可空则不校验）
 ```
 
-## 前端
+## 前端与多端
 
-`apps/web` 调用上述只读契约；默认 bypass，无需填 Bearer。
+- `apps/web` → `packages/api-client`（ESM）
+- `apps/mobile-ios` → `packages/swift-api-client`
+- `apps/mobile-android` → 应用内 OkHttp 客户端（同 JSON 形状）
+
+默认 bypass，无需填 Bearer。构建说明：[mobile.md](./mobile.md)。

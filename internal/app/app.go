@@ -66,7 +66,7 @@ func Run() error {
 	}
 	defer shutdown(context.Background())
 
-	pipe, obs, cleanup, err := BuildWithFeatures(settings, feat)
+	pipe, obs, storeBuild, cleanup, err := BuildWithFeatures(settings, feat)
 	if err != nil {
 		return err
 	}
@@ -90,6 +90,14 @@ func Run() error {
 		Alerts: observe.NewAlertBoard(),
 		Infra:  stack,
 		Feat:   feat,
+		Storage: httpapi.StorageInfo{
+			WantMode:   string(storeBuild.WantMode),
+			Mode:       string(storeBuild.Mode),
+			FailPolicy: settings.StorageFail,
+			SheetsKind: storeBuild.SheetsKind,
+			PGKind:     storeBuild.PGKind,
+			Notes:      storeBuild.Notes,
+		},
 	}
 	thttp.RegisterNoProtocolServiceMux(s.Service("trpc.earnings.sync.HTTP"), api.Handler())
 	obs.Logger.Info("earnings-sync listening",
@@ -123,20 +131,21 @@ func syncOnStart(pipe *pipeline.Pipeline, obs *observe.Obs) {
 }
 
 // Build wires config, storage, the model, Sheets/PG dual-write, and Feishu.
-func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, func() error, error) {
+func Build(settings config.Settings) (*pipeline.Pipeline, *observe.Obs, StoreBuild, func() error, error) {
 	return BuildWithFeatures(settings, features.Resolve(features.FromEnv()))
 }
 
 // BuildWithFeatures is Build with an explicit feature bundle (tests / CLI).
-func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipeline.Pipeline, *observe.Obs, func() error, error) {
+func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipeline.Pipeline, *observe.Obs, StoreBuild, func() error, error) {
 	noop := func() error { return nil }
+	empty := StoreBuild{Cleanup: noop}
 	reg, err := config.Load(settings.CompaniesFile)
 	if err != nil {
-		return nil, nil, noop, err
+		return nil, nil, empty, noop, err
 	}
 	macroReg, err := config.LoadMacro(settings.MacroFile)
 	if err != nil {
-		return nil, nil, noop, err
+		return nil, nil, empty, noop, err
 	}
 	obs := observe.New()
 	var model extract.Provider
@@ -159,7 +168,7 @@ func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipelin
 	}
 	built, err := BuildStoreDetailed(context.Background(), settings, feat)
 	if err != nil {
-		return nil, nil, noop, err
+		return nil, nil, empty, noop, err
 	}
 	cleanup := built.Cleanup
 	for _, note := range built.Notes {
@@ -178,7 +187,7 @@ func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipelin
 	})
 	if err != nil {
 		_ = cleanup()
-		return nil, nil, noop, err
+		return nil, nil, built, noop, err
 	}
 	prevCleanup := cleanup
 	cleanup = func() error {
@@ -211,5 +220,5 @@ func BuildWithFeatures(settings config.Settings, feat features.Bundle) (*pipelin
 		Obs:          obs,
 		SECUserAgent: settings.SECUserAgent,
 		Client:       http.DefaultClient,
-	}, obs, cleanup, nil
+	}, obs, built, cleanup, nil
 }
