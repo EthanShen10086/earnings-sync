@@ -1,6 +1,6 @@
 # HTTP API 契约（稳定读写面）
 
-契约版本：`2026-11-21.1`（响应头 `X-API-Version`，以及 `GET /v1/meta`）。
+契约版本：`2026-11-22.1`（响应头 `X-API-Version`，以及 `GET /v1/meta`）。商用控制面见 [commercial-ops.md](commercial-ops.md)。
 
 服务入口仍是仓库根目录 `cmd/server`（monorepo 边界说明见 `apps/api`）。无真实 Google/LLM/IdP 密钥时可演示：`AUTH_MODE=bypass` + Memory/PG 读回。
 
@@ -18,8 +18,9 @@
 
 - `GET /v1/auth/providers` → `{ mode, providers[] }`
 - `GET /v1/auth/me` → `{ principal: { sub, email, name, roles, tenant, source } }`
-- `GET /v1/platform/status` → feature flags + infra 状态
+- `GET /v1/platform/status` → feature flags + infra + commercial 摘要
 - `GET /v1/search?q=` / `GET /v1/audit` — 需 `FEATURE_SEARCH` / `FEATURE_AUDIT` 开启
+- `GET /v1/commercial/status` · tenants / canary / hitl / lakehouse / sla — 见 [commercial-ops.md](commercial-ops.md)
 
 ## 读写契约
 

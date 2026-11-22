@@ -1,9 +1,9 @@
-# HPA placeholder — enable after metrics-server / custom metrics exist.
-# Intentionally conservative; tune after real load tests.
+# HPA — apply after metrics-server exists. Local validate uses dry-run only.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: earnings-sync
+  namespace: earnings-sync
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -18,4 +18,3 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
-  # behavior: omitted — use cluster defaults until SLO-driven tuning

@@ -223,5 +223,14 @@ func (a API) platformStatus(w http.ResponseWriter, r *http.Request) {
 	} else if a.featActive("kafka") && a.Feat.Bus != nil {
 		body["kafka_events"] = a.Feat.Bus.Len()
 	}
+	if a.Commercial.ORM != nil {
+		body["commercial"] = map[string]any{
+			"orm_backend":     a.Commercial.ORM.Backend(),
+			"tenants":         len(a.Commercial.Tenants.List()),
+			"canary_releases": len(a.Commercial.Canary.List()),
+			"lake_partitions": a.Commercial.Lakehouse.PartitionCount(),
+			"sla_drills":      len(a.Commercial.SLA.ListDrills()),
+		}
+	}
 	writeJSON(w, http.StatusOK, body)
 }

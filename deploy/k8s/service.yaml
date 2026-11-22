@@ -2,13 +2,14 @@ apiVersion: v1
 kind: Service
 metadata:
   name: earnings-sync
+  namespace: earnings-sync
   labels:
     app: earnings-sync
 spec:
   type: ClusterIP
   selector:
     app: earnings-sync
-    # Blue/green cutover: change slot blue → green after the green Deployment is ready.
+    # Flip slot: blue → green (or canary) after soak / promote.
     slot: blue
   ports:
     - name: http

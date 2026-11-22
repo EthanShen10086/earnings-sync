@@ -17,20 +17,22 @@ import (
 )
 
 // APIContractVersion is the stable JSON contract revision for /v1/*.
-const APIContractVersion = "2026-11-21.1"
+const APIContractVersion = "2026-11-22.1"
 
 // API is the HTTP surface of the tRPC service.
 type API struct {
-	Pipe   *pipeline.Pipeline
-	Obs    *observe.Obs
-	Facts  sheet.Reader // optional; Postgres or Memory readback for apps/web
-	Auth   auth.Config
-	Alerts *observe.AlertBoard
-	Infra  *infra.Stack    // data-plane adapters (cache/mq/objects/audit/search)
-	Feat   features.Bundle // feature flags; gates platform side-effects
+	Pipe       *pipeline.Pipeline
+	Obs        *observe.Obs
+	Facts      sheet.Reader // optional; Postgres or Memory readback for apps/web
+	Auth       auth.Config
+	Alerts     *observe.AlertBoard
+	Infra      *infra.Stack    // data-plane adapters (cache/mq/objects/audit/search)
+	Feat       features.Bundle // feature flags; gates platform side-effects
+	Commercial Commercial      // ORM/tenant/canary/HITL/lakehouse/SLA stubs
 }
 
 func (a API) Handler() http.Handler {
+	a.EnsureCommercial()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.Handle("GET /metrics", a.Obs.MetricsHandler())
@@ -55,7 +57,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/jobs/{id}", a.getJob)
 	mux.HandleFunc("GET /v1/facts", a.listFacts)
 	mux.HandleFunc("OPTIONS /v1/facts", optionsOK)
+	a.registerCommercial(mux)
 	h := auth.Middleware(a.authConfig(), mux)
+	if a.Commercial.Tenants != nil {
+		h = a.Commercial.Tenants.Middleware(h)
+	}
 	if a.Infra != nil && a.Infra.Gateway != nil {
 		h = a.Infra.Gateway.Handler(h)
 	}
@@ -85,7 +91,11 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 		"service":      "earnings-sync",
 		"auth_mode":    cfg.Mode,
 		"storage_hint": "STORAGE_MODE=sheets-only|pg-only|dual",
-		"docs":         []string{"docs/api-contract.md", "docs/observability.md"},
+		"docs": []string{
+			"docs/api-contract.md",
+			"docs/observability.md",
+			"docs/commercial-ops.md",
+		},
 		"endpoints": []map[string]string{
 			{"method": "GET", "path": "/healthz", "auth": "public"},
 			{"method": "GET", "path": "/metrics", "auth": "public"},
@@ -96,6 +106,12 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 			{"method": "GET", "path": "/v1/jobs/{id}", "auth": "required"},
 			{"method": "POST", "path": "/v1/ingest", "auth": "required"},
 			{"method": "GET", "path": "/v1/ops/alerts", "auth": "required"},
+			{"method": "GET", "path": "/v1/commercial/status", "auth": "required"},
+			{"method": "GET", "path": "/v1/tenants", "auth": "required"},
+			{"method": "POST", "path": "/v1/canary/releases", "auth": "required"},
+			{"method": "POST", "path": "/v1/hitl/ask", "auth": "required"},
+			{"method": "POST", "path": "/v1/lakehouse/facts", "auth": "required"},
+			{"method": "POST", "path": "/v1/sla/drills", "auth": "required"},
 		},
 		"capabilities": map[string]bool{
 			"facts_read":      true,
