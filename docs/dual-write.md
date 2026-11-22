@@ -64,4 +64,4 @@ curl 'http://127.0.0.1:8090/v1/facts?ticker=AAPL'
 
 ## 本轮不做
 
-Kafka、K8s、完整 IAM、湖仓、CDN、蓝绿等——见 Project 路线图 `platform-roadmap.md`。
+Kafka、K8s、完整 IAM、湖仓、CDN、蓝绿等——见 [platform-roadmap.md](platform-roadmap.md)。「集中式存储 / 跨实例幂等」✅ 已实现（有 `DATABASE_URL`；无 PG 降级单机文件 / Memory）。
