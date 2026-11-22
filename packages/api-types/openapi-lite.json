@@ -1,0 +1,118 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "earnings-sync HTTP API",
+    "version": "2026-11-22.1",
+    "description": "Lite contract for apps/web and mobile shells. Full prose: docs/api-contract.md"
+  },
+  "servers": [{ "url": "http://127.0.0.1:8090" }],
+  "paths": {
+    "/v1/meta": {
+      "get": {
+        "summary": "Public service meta + storage snapshot",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Meta" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/facts": {
+      "get": {
+        "summary": "List facts for ticker",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FactsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/platform/status": {
+      "get": {
+        "summary": "Feature flags + storage + infra",
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "summary": "Current principal",
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StorageInfo": {
+        "type": "object",
+        "properties": {
+          "want_mode": { "type": "string", "enum": ["sheets-only", "pg-only", "dual", "unknown"] },
+          "mode": { "type": "string" },
+          "fail_policy": { "type": "string" },
+          "sheets_kind": { "type": "string", "enum": ["google", "memory", "unknown"] },
+          "pg_kind": { "type": "string", "enum": ["postgres", "memory", "none", "unknown"] },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Meta": {
+        "type": "object",
+        "required": ["api_version", "service", "storage"],
+        "properties": {
+          "api_version": { "type": "string" },
+          "service": { "type": "string" },
+          "auth_mode": { "type": "string" },
+          "storage": { "$ref": "#/components/schemas/StorageInfo" }
+        }
+      },
+      "FactRow": {
+        "type": "object",
+        "properties": {
+          "idempotency_key": { "type": "string" },
+          "spreadsheet_id": { "type": "string" },
+          "ticker": { "type": "string" },
+          "fiscal_year": { "type": "integer" },
+          "fiscal_quarter": { "type": "integer" },
+          "line_item": { "type": "string" },
+          "value": { "type": "number" },
+          "unit": { "type": "string" }
+        }
+      },
+      "FactsResponse": {
+        "type": "object",
+        "properties": {
+          "facts": { "type": "array", "items": { "$ref": "#/components/schemas/FactRow" } },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "api_version": { "type": "string" },
+              "count": { "type": "integer" },
+              "ticker": { "type": "string" },
+              "cache_hit": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

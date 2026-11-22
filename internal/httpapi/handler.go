@@ -19,6 +19,16 @@ import (
 // APIContractVersion is the stable JSON contract revision for /v1/*.
 const APIContractVersion = "2026-11-22.1"
 
+// StorageInfo is the effective Sheets/PG wiring exposed to clients (web/mobile).
+type StorageInfo struct {
+	WantMode   string   `json:"want_mode"`
+	Mode       string   `json:"mode"`
+	FailPolicy string   `json:"fail_policy,omitempty"`
+	SheetsKind string   `json:"sheets_kind"`
+	PGKind     string   `json:"pg_kind"`
+	Notes      []string `json:"notes,omitempty"`
+}
+
 // API is the HTTP surface of the tRPC service.
 type API struct {
 	Pipe       *pipeline.Pipeline
@@ -29,6 +39,7 @@ type API struct {
 	Infra      *infra.Stack    // data-plane adapters (cache/mq/objects/audit/search)
 	Feat       features.Bundle // feature flags; gates platform side-effects
 	Commercial Commercial      // ORM/tenant/canary/HITL/lakehouse/SLA stubs
+	Storage    StorageInfo     // Sheets + PG coexistence snapshot
 }
 
 func (a API) Handler() http.Handler {
@@ -91,10 +102,13 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 		"service":      "earnings-sync",
 		"auth_mode":    cfg.Mode,
 		"storage_hint": "STORAGE_MODE=sheets-only|pg-only|dual",
+		"storage":      a.storagePayload(),
 		"docs": []string{
 			"docs/api-contract.md",
 			"docs/observability.md",
 			"docs/commercial-ops.md",
+			"docs/monorepo.md",
+			"docs/coexistence-acceptance.md",
 		},
 		"endpoints": []map[string]string{
 			{"method": "GET", "path": "/healthz", "auth": "public"},
@@ -106,6 +120,7 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 			{"method": "GET", "path": "/v1/jobs/{id}", "auth": "required"},
 			{"method": "POST", "path": "/v1/ingest", "auth": "required"},
 			{"method": "GET", "path": "/v1/ops/alerts", "auth": "required"},
+			{"method": "GET", "path": "/v1/platform/status", "auth": "required"},
 			{"method": "GET", "path": "/v1/commercial/status", "auth": "required"},
 			{"method": "GET", "path": "/v1/tenants", "auth": "required"},
 			{"method": "POST", "path": "/v1/canary/releases", "auth": "required"},
@@ -124,9 +139,42 @@ func (a API) meta(w http.ResponseWriter, r *http.Request) {
 			"search":          a.featActive("search"),
 			"audit":           a.featActive("audit"),
 			"platform_status": true,
+			"storage_status":  true,
 		},
 		"features": a.Feat.Report,
+		"clients": []string{
+			"apps/web",
+			"apps/mobile-ios",
+			"apps/mobile-android",
+			"packages/api-client",
+		},
 	})
+}
+
+func (a API) storagePayload() map[string]any {
+	info := a.Storage
+	if info.Mode == "" && info.WantMode == "" {
+		return map[string]any{
+			"want_mode":   "unknown",
+			"mode":        "unknown",
+			"sheets_kind": "unknown",
+			"pg_kind":     "unknown",
+			"notes":       []string{"storage snapshot not wired (tests may omit API.Storage)"},
+		}
+	}
+	out := map[string]any{
+		"want_mode":   info.WantMode,
+		"mode":        info.Mode,
+		"sheets_kind": info.SheetsKind,
+		"pg_kind":     info.PGKind,
+	}
+	if info.FailPolicy != "" {
+		out["fail_policy"] = info.FailPolicy
+	}
+	if len(info.Notes) > 0 {
+		out["notes"] = info.Notes
+	}
+	return out
 }
 
 func (a API) authMe(w http.ResponseWriter, r *http.Request) {

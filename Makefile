@@ -1,4 +1,4 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up observe-up elk-up k8s-validate docker-build
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up observe-up elk-up k8s-validate docker-build monorepo-check mobile-swift-test mobile-ios mobile-android
 
 test:
 	go test ./...
@@ -30,8 +30,31 @@ pg-test:
 	@test -n "$$DATABASE_URL" || (echo 'set DATABASE_URL first'; exit 1)
 	go test ./internal/store/postgres ./internal/sheet ./internal/job ./internal/orchestrator -count=1
 
+# Serve repo root so apps/web can import ../../packages/api-client.
 web:
-	cd apps/web && python3 -m http.server 5173 --bind 127.0.0.1
+	python3 -m http.server 5173 --bind 127.0.0.1
+
+monorepo-check:
+	go test ./internal/monorepo -count=1
+
+mobile-swift-test:
+	cd packages/swift-api-client && swift test
+
+mobile-ios:
+	cd apps/mobile-ios && xcodegen generate
+	cd apps/mobile-ios && xcodebuild \
+		-project EarningsSync.xcodeproj \
+		-scheme EarningsSync \
+		-destination 'platform=iOS Simulator,name=iPhone 16' \
+		-configuration Debug \
+		CODE_SIGNING_ALLOWED=NO \
+		build
+
+mobile-android:
+	@command -v java >/dev/null || (echo 'JDK 17+ required for Android build'; exit 1)
+	@test -n "$$ANDROID_HOME$$ANDROID_SDK_ROOT" -o -d "$$HOME/Library/Android/sdk" || \
+		(echo 'Android SDK required (set ANDROID_HOME). Skeleton + gradlew are in apps/mobile-android; see docs/mobile.md'; exit 1)
+	cd apps/mobile-android && ./gradlew :app:assembleDebug
 
 orchestrate-check:
 	go run ./cmd/orchestrate -check

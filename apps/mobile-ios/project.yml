@@ -1,0 +1,28 @@
+name: EarningsSync
+options:
+  bundleIdPrefix: com.earningssync
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  BASE_SDK: iphoneos
+  TARGETED_DEVICE_FAMILY: "1,2"
+  SWIFT_VERSION: "5.9"
+packages:
+  EarningsSyncAPI:
+    path: ../../packages/swift-api-client
+targets:
+  EarningsSync:
+    type: application
+    platform: iOS
+    sources:
+      - path: EarningsSync
+    dependencies:
+      - package: EarningsSyncAPI
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.earningssync.mobile
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      INFOPLIST_KEY_CFBundleDisplayName: earnings-sync
+      GENERATE_INFOPLIST_FILE: YES
+      CURRENT_PROJECT_VERSION: 1
+      MARKETING_VERSION: "0.1.0"
