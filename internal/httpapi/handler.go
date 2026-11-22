@@ -57,7 +57,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("OPTIONS /v1/facts", optionsOK)
 	h := auth.Middleware(a.authConfig(), mux)
 	if a.Infra != nil && a.Infra.Gateway != nil {
-		h = a.Infra.Gateway.Middleware(h)
+		h = a.Infra.Gateway.Handler(h)
 	}
 	return h
 }
@@ -135,10 +135,15 @@ func (a API) listAlerts(w http.ResponseWriter, r *http.Request) {
 	if board == nil {
 		board = observe.NewAlertBoard()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"alerts": board.List(),
-		"note":   "Local stub board; see deploy/alert-rules.yml and docs/observability.md",
-	})
+		"note":   "Local stub board + loaded Prometheus rules; see deploy/alert-rules.yml and docs/observability.md",
+	}
+	if a.Infra != nil && len(a.Infra.AlertRules) > 0 {
+		body["prometheus_rules"] = a.Infra.AlertRules
+		body["prometheus_rules_loaded"] = true
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (a API) listFacts(w http.ResponseWriter, r *http.Request) {

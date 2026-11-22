@@ -37,6 +37,8 @@ type Flags struct {
 	ObjectStorage Want
 	Audit         Want
 	Search        Want
+	Discovery     Want
+	ELK           Want // log shipper → file / Elasticsearch
 	Notify        Want // Feishu; auto = webhook present
 	LLM           Want // DeepSeek; auto = API key present
 	SheetsGoogle  Want // Google Sheets; auto = creds present
@@ -50,6 +52,8 @@ type Deps struct {
 	KafkaBrokers   string
 	ObjectEndpoint string
 	ObjectBucket   string
+	DiscoveryURL   string
+	Elasticsearch  string
 	FeishuWebhook  string
 	ModelAPIKey    string
 	GoogleCreds    string
@@ -86,6 +90,8 @@ func FromEnv() (Flags, Deps) {
 			ObjectStorage: parseWant(os.Getenv("FEATURE_OBJECT_STORAGE"), WantOff),
 			Audit:         parseWant(os.Getenv("FEATURE_AUDIT"), WantOff),
 			Search:        parseWant(os.Getenv("FEATURE_SEARCH"), WantOff),
+			Discovery:     parseWant(os.Getenv("FEATURE_DISCOVERY"), WantOff),
+			ELK:           parseWant(firstEnv("FEATURE_ELK", "FEATURE_LOG_SHIPPER"), WantOff),
 			Notify:        parseWant(os.Getenv("FEATURE_NOTIFY"), WantAuto),
 			LLM:           parseWant(os.Getenv("FEATURE_LLM"), WantAuto),
 			SheetsGoogle:  parseWant(os.Getenv("FEATURE_SHEETS_GOOGLE"), WantAuto),
@@ -96,6 +102,8 @@ func FromEnv() (Flags, Deps) {
 			KafkaBrokers:   strings.TrimSpace(os.Getenv("KAFKA_BROKERS")),
 			ObjectEndpoint: strings.TrimSpace(firstEnv("OBJECT_STORAGE_ENDPOINT", "S3_ENDPOINT")),
 			ObjectBucket:   strings.TrimSpace(firstEnv("OBJECT_STORAGE_BUCKET", "S3_BUCKET")),
+			DiscoveryURL:   strings.TrimSpace(firstEnv("DISCOVERY_URL", "NACOS_ADDR", "CONSUL_HTTP_ADDR", "EUREKA_URL")),
+			Elasticsearch:  strings.TrimSpace(firstEnv("ELASTICSEARCH_URL", "ES_URL")),
 			FeishuWebhook:  strings.TrimSpace(os.Getenv("FEISHU_WEBHOOK_URL")),
 			ModelAPIKey:    strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
 			GoogleCreds:    strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")),
@@ -135,6 +143,9 @@ func Resolve(flags Flags, deps Deps) Bundle {
 	b.Report = append(b.Report, resolvePlugin("search", flags.Search, true, &b.Search, func() Searcher {
 		return &MemorySearch{}
 	}))
+	// Discovery / ELK are wired primarily via internal/infra; flag report keeps Active() honest.
+	b.Report = append(b.Report, resolveCred("discovery", flags.Discovery, deps.DiscoveryURL != "", "DISCOVERY_URL"))
+	b.Report = append(b.Report, resolveCred("elk", flags.ELK, deps.Elasticsearch != "", "ELASTICSEARCH_URL"))
 
 	b.Report = append(b.Report, resolveCred("notify", flags.Notify, deps.FeishuWebhook != "", "FEISHU_WEBHOOK_URL"))
 	b.Report = append(b.Report, resolveCred("llm", flags.LLM, deps.ModelAPIKey != "", "DEEPSEEK_API_KEY"))

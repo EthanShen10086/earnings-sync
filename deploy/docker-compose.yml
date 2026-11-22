@@ -56,11 +56,16 @@ services:
     image: prom/prometheus:v2.54.1
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
     ports:
       - "9090:9090"
     profiles: ["observe"]
 
-  # Optional dashboard host — import deploy/grafana/dashboards/earnings-sync.json manually.
+  # Optional dashboard host — datasources + dashboards auto-provisioned.
   grafana:
     image: grafana/grafana:11.2.0
     ports:
@@ -71,8 +76,54 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
     profiles: ["observe"]
+
+  # ELK skeleton: Elasticsearch + Kibana + Filebeat.
+  # App can also ship via internal/observability to file or ELASTICSEARCH_URL.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - earnings_es:/usr/share/elasticsearch/data
+    profiles: ["elk"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles: ["elk"]
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.3
+    user: root
+    volumes:
+      - ./elk/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ../data/logs:/var/log/earnings-sync:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles: ["elk"]
+    command: ["filebeat", "-e", "-strict.perms=false"]
 
 volumes:
   earnings_pg:
   earnings_minio:
+  earnings_es:

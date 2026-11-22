@@ -1,0 +1,26 @@
+# Filebeat shipper skeleton for earnings-sync JSONL logs.
+# Compose profile `elk` mounts this; without Elasticsearch the Go process
+# still writes data/logs/app.jsonl via internal/observability.Shipper.
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/earnings-sync/*.jsonl
+    json.keys_under_root: true
+    json.add_error_key: true
+
+processors:
+  - add_fields:
+      target: ""
+      fields:
+        service: earnings-sync
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  index: "earnings-sync-%{+yyyy.MM.dd}"
+
+setup.ilm.enabled: false
+setup.template.name: "earnings-sync"
+setup.template.pattern: "earnings-sync-*"
+
+logging.level: info

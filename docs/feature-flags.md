@@ -25,6 +25,8 @@ FEATURE_KAFKA=0|1|auto
 FEATURE_OBJECT_STORAGE=0|1|auto
 FEATURE_AUDIT=0|1|auto
 FEATURE_SEARCH=0|1|auto
+FEATURE_DISCOVERY=0|1|auto
+FEATURE_ELK=0|1|auto
 
 # 凭证类（默认 auto；=1 且无密钥 → 本地 stub provider）
 FEATURE_NOTIFY=auto
@@ -36,6 +38,11 @@ FEATURE_OTEL=auto
 REDIS_URL=
 MQ_URL=
 KAFKA_BROKERS=
+KAFKA_EVENT_LOG=data/kafka-events.jsonl
+DISCOVERY_BACKEND=memory
+DISCOVERY_URL=
+ELASTICSEARCH_URL=
+LOG_SHIPPER_PATH=data/logs/app.jsonl
 OBJECT_STORAGE_ENDPOINT=
 OBJECT_STORAGE_BUCKET=
 ```
@@ -57,7 +64,9 @@ OBJECT_STORAGE_BUCKET=
 - cache Set → `GET /v1/facts` 返回 `meta.cache_hit`
 - mq Publish（内存订阅可收到）
 - object Put（`OBJECT_STORE_DIR`）
-- kafka 进程内 Bus
+- kafka `internal/adapters/kafka`（memory/file/broker-stub）
+- discovery Discover（`internal/discovery` 内存或 Nacos/Consul/Eureka stub）
+- elk Shipper 写 JSONL（可选 POST ES）
 
 总览：`GET /v1/platform/status`。
 
@@ -65,6 +74,8 @@ OBJECT_STORAGE_BUCKET=
 
 - `internal/features` — flag 解析与可运行 stub（flag on 无依赖 → Memory）
 - `internal/infra` + `internal/adapters` — 可拨号客户端，失败降级 Memory/文件
+- `internal/discovery` — Nacos/Consul/Eureka 接口 + 内存注册表
+- `internal/observability` — log shipper + Prometheus rule 加载
 - `internal/httpapi` — ingest 副作用 + search/audit/platform API
 - `internal/extract.StubProvider` / `internal/notify.Memory` / `internal/auth` OIDC stub
 - `internal/app.BuildStoreDetailed` — 存储软降级

@@ -1,5 +1,6 @@
-# Prometheus alert rule stubs for earnings-sync.
-# Not loaded by default compose — wire into Prometheus when you own on-call.
+# Prometheus alert rules for earnings-sync.
+# Loaded by deploy/prometheus.yml (compose profile observe) and by
+# internal/observability.LoadAlertRules → /v1/ops/alerts + /v1/platform/status.
 groups:
   - name: earnings-sync-stubs
     rules:
