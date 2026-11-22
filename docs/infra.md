@@ -59,10 +59,18 @@ CDN 样例见 `deploy/cdn.env.example`。
 
 ## Kubernetes 骨架
 
-`deploy/k8s/` 含 Deployment / Service / HPA，以及蓝绿切换注释。不要当成已上线的编排；本机仍以 compose 为准。
+`deploy/k8s/` 含 Namespace / ConfigMap / Deployment / canary Deployment / Service / HPA，以及 `kustomization.yaml`。
+
+```bash
+make k8s-validate   # 无集群：kubectl --dry-run=client 或 YAML 结构检查
+make docker-build   # 根目录 Dockerfile → earnings-sync:local
+```
+
+商用控制面（ORM / 多租户 / flow 灰度 / HITL / 湖仓 / SLA 演练）见 [commercial-ops.md](commercial-ops.md)。不要当成已上线生产拓扑；本机仍以 compose 为准。
 
 ## 不做
 
 - 不改 pipeline 写入核心路径（本轮只接线 HTTP / 启动日志）
 - 不引入 Nacos/Consul/Eureka/Kafka 重量级 SDK；接口 + 可跑 stub + 拨号探测足够演示
-- 不宣称生产 ELK / 完整边缘 API Gateway 已就绪
+- 不宣称生产 ELK / 完整边缘 API Gateway / 真实数仓已就绪
+- 不引入 redis/nats 重量级 SDK；RESP / TCP 探测 + memory 降级足够演示

@@ -1,0 +1,9 @@
+.git
+.worktrees
+data
+*.db
+.env
+coverage.out
+bin
+apps/web/node_modules
+**/*_test.go

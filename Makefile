@@ -1,7 +1,14 @@
-.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up observe-up elk-up
+.PHONY: test fmt fmt-check run tidy doctor live hooks orchestrate orchestrate-live orchestrate-check pg-up pg-test web infra-up observe-up elk-up k8s-validate docker-build
 
 test:
 	go test ./...
+
+k8s-validate:
+	chmod +x deploy/k8s/validate.sh
+	./deploy/k8s/validate.sh
+
+docker-build:
+	docker build -t earnings-sync:local .
 
 pg-up:
 	docker compose -f deploy/docker-compose.yml up -d postgres

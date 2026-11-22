@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: earnings-sync
+  namespace: earnings-sync
+  labels:
+    app: earnings-sync
+data:
+  STORAGE_MODE: sheets-only
+  INFRA_STRICT: "false"
+  RATE_LIMIT_RPS: "0"
+  FEATURE_AUDIT: "0"
+  FEATURE_SEARCH: "0"

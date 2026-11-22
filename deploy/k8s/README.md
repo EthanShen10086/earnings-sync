@@ -1,22 +1,40 @@
-# Kubernetes placeholders
+# Kubernetes manifests
 
-These manifests are **skeletons**, not a production cluster:
+Apply-able skeletons for Deployment / Service / HPA / canary. **Not** a production cluster.
 
 | File | Purpose |
 | --- | --- |
-| `deployment.yaml` | Single Deployment (`slot: blue`) with `/healthz` probes |
-| `service.yaml` | ClusterIP; flip `slot` for blue/green cutover comments |
-| `hpa.yaml` | CPU HPA stub (needs metrics-server) |
+| `namespace.yaml` | `earnings-sync` namespace |
+| `configmap.yaml` | Non-secret env (`STORAGE_MODE`, flags) |
+| `deployment.yaml` | Stable Deployment (`slot: blue`) + `/healthz` probes |
+| `canary-deployment.yaml` | Canary Deployment (`slot: canary`) |
+| `service.yaml` | ClusterIP; flip `slot` for cutover |
+| `hpa.yaml` | CPU HPA (needs metrics-server) |
+| `kustomization.yaml` | `kubectl apply -k deploy/k8s` |
+| `validate.sh` | Local check: kubectl dry-run **or** YAML structural fallback |
 
-## Blue / green (commented workflow)
+## Local validation (no cluster)
 
-1. Deploy `earnings-sync` with `slot: blue` (default).
-2. Apply a twin Deployment named `earnings-sync-green` with `slot: green` and the new image.
-3. When green is Ready, patch Service selector `slot: green`.
-4. Keep blue around for fast rollback; delete after soak.
+```bash
+make k8s-validate
+# or
+./deploy/k8s/validate.sh
+```
 
-No Service Mesh / Argo Rollouts wiring in this round.
+## Apply (when you have a cluster)
 
-## Local compose still preferred
+```bash
+docker build -t earnings-sync:local .
+kubectl apply -k deploy/k8s
+kubectl -n earnings-sync get deploy,svc,hpa
+```
 
-For developer machines use `deploy/docker-compose.yml` profiles (`cache`, `mq`, `objects`, `observe`) rather than these manifests.
+## Blue / green / canary
+
+1. Deploy blue (`deployment.yaml`).
+2. Deploy canary (`canary-deployment.yaml`) with the new image.
+3. Drive flow gray release via `/v1/canary/releases` (in-process state machine; works without mesh).
+4. When ready, patch Service selector `slot: canary` (or `green`) and/or `POST .../promote`.
+5. Keep blue for rollback; `POST .../rollback` freezes the release object.
+
+Sheets + PostgreSQL dual-write is orthogonal: set `STORAGE_MODE` / `DATABASE_URL` on the Pod.

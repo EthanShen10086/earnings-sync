@@ -1,0 +1,60 @@
+# Optional canary Deployment (slot=canary). Keep Service on slot=blue until
+# /v1/canary pick + soak say otherwise; then flip selector or use mesh weights.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: earnings-sync-canary
+  namespace: earnings-sync
+  labels:
+    app: earnings-sync
+    slot: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: earnings-sync
+      slot: canary
+  template:
+    metadata:
+      labels:
+        app: earnings-sync
+        slot: canary
+    spec:
+      containers:
+        - name: api
+          image: earnings-sync:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+          envFrom:
+            - configMapRef:
+                name: earnings-sync
+          env:
+            - name: CANARY_SLOT
+              value: canary
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: earnings-sync
+                  key: database-url
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

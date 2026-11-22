@@ -1,10 +1,11 @@
 # Minimal Deployment skeleton — not a production topology.
 # Blue/green: keep a second Deployment (earnings-sync-green) and switch Service
-# selector; or use an Ingress / Service Mesh canary. This file is a placeholder.
+# selector; or use canary-deployment.yaml + /v1/canary for flow gray release.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: earnings-sync
+  namespace: earnings-sync
   labels:
     app: earnings-sync
     # slot: blue | green  — flip Service selector for blue/green cutover
@@ -28,9 +29,10 @@ spec:
           ports:
             - name: http
               containerPort: 8090
+          envFrom:
+            - configMapRef:
+                name: earnings-sync
           env:
-            - name: STORAGE_MODE
-              value: sheets-only
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -41,10 +43,6 @@ spec:
               value: redis://redis:6379/0
             - name: OBJECT_STORE_DIR
               value: /var/earnings/objects
-            - name: RATE_LIMIT_RPS
-              value: "0"
-            - name: INFRA_STRICT
-              value: "false"
           readinessProbe:
             httpGet:
               path: /healthz
