@@ -263,6 +263,30 @@ companies:
     sources:
       - type: sec_edgar
         cik: "0001067983"
+  - ticker: PDD
+    name: PDD Holdings
+    fiscal_year_end_month: 12
+    spreadsheet_id: 1cnNG4Zrug79-OyiqejB9NOeAntt83E81m8-gcx_5Il8
+    prompt: |
+      财年是自然年。金额用十亿美元，取公告里的 US$ 便利折算（不要用人民币主表）。比率用小数，58.3% 写成 0.583。
+      只用「三个月 / three months ended」当季列，不要把九个月累计写入当季。
+      online_marketing_revenue 是 online marketing services and others。
+      transaction_services_revenue 是 transaction services。
+      total_revenue 是 Total revenues。gross_margin 用毛利率（1 − costs of revenues / total revenues）。
+      net_income 是归属于普通股股东的净利润（net income attributable to ordinary shareholders）。
+      diluted_eps 用稀释每股 ADS（diluted earnings per ADS），单位美元。
+      cash 是 Cash and cash equivalents，不要把 Restricted cash 加进去。short_term_investments 是 Short-term investments。
+      equity 是 Total shareholders' equity。operating_cash_flow 用当季 Net cash from operating activities。
+    segments:
+      - key: online_marketing_revenue
+        column: D
+        header: 在线营销及其他_十亿美元
+      - key: transaction_services_revenue
+        column: E
+        header: 交易服务_十亿美元
+    sources:
+      - type: sec_edgar
+        cik: "0001737806"
   - ticker: SPACEX
     name: SpaceX
     fiscal_year_end_month: 12

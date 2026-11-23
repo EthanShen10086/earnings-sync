@@ -116,7 +116,7 @@ curl -H 'content-type: application/json' -d '{"ticker":"AAPL"}' http://127.0.0.1
 curl -H 'content-type: application/json' -d '{"job_id":"<id>","instruction":"画营收饼图"}' http://127.0.0.1:8090/v1/charts/apply
 ```
 
-公司在 `configs/companies.yaml`。Apple 用现有表格。Alphabet、Tesla 走 SEC，要先建表并填 spreadsheet id。SpaceX 没有公开 10-Q，只能手动传文件。Cursor 里让模型操作同一套工具时，启用 `.cursor/mcp.json` 的 `earnings-sync`，说明在 `skills/earnings-agent/SKILL.md`。
+公司在 `configs/companies.yaml`。Apple 用现有表格。Alphabet、Tesla 走 SEC，要先建表并填 spreadsheet id。拼多多（PDD）是境外发行人，走 6-K 业绩公告 / 20-F，分部是在线营销与交易服务；建表后同样按季追加。SpaceX 没有公开 10-Q，只能手动传文件。Cursor 里让模型操作同一套工具时，启用 `.cursor/mcp.json` 的 `earnings-sync`，说明在 `skills/earnings-agent/SKILL.md`。
 
 HTTP 在 `:8090`（含 `GET /v1/facts?ticker=AAPL`）。pprof 在 `127.0.0.1:8091/debug/pprof/`。指标在 `/metrics`。要看 trace：`docker compose -f deploy/docker-compose.yml --profile observe up -d`，再把 `OTEL_EXPORTER_OTLP_ENDPOINT` 设为 `http://localhost:4318`。
 

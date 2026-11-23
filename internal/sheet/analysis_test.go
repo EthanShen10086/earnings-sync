@@ -50,6 +50,24 @@ func TestAnalysisFormulasCoverThreeStatements(t *testing.T) {
 	}
 }
 
+func TestPDDIncomeHeadersUseSegments(t *testing.T) {
+	segs := []config.Segment{
+		{Key: "online_marketing_revenue", Column: "D", Header: "在线营销及其他_十亿美元"},
+		{Key: "transaction_services_revenue", Column: "E", Header: "交易服务_十亿美元"},
+	}
+	row := incomeHeaders(segs)
+	if row[3] != "在线营销及其他_十亿美元" || row[4] != "交易服务_十亿美元" {
+		t.Fatalf("%v", row)
+	}
+	if row[9] != "总营收_十亿美元" {
+		t.Fatalf("total col %v", row[9])
+	}
+	sum := segmentSumFormula(segs)
+	if !strings.Contains(sum, "D2:D80") || !strings.Contains(sum, "E2:E80") {
+		t.Fatal(sum)
+	}
+}
+
 func TestAnalysisFormulasFollowSegments(t *testing.T) {
 	segs := []config.Segment{
 		{Key: "productivity_revenue", Column: "D", Header: "生产力与业务流程_十亿美元"},

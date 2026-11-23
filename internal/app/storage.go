@@ -45,20 +45,28 @@ func BuildStoreDetailed(ctx context.Context, settings config.Settings, feat feat
 	}
 	fail := sheet.ParseFailPolicy(settings.StorageFail)
 
-	tryGoogle := settings.GoogleCreds != ""
+	hasGoogle := settings.GoogleCreds != "" || settings.GoogleOAuthToken != ""
+	tryGoogle := hasGoogle
 	if feat.Flags.SheetsGoogle != "" {
 		tryGoogle = feat.UseGoogleSheets()
 	}
 
 	var sheetsStore sheet.Store
 	if tryGoogle {
-		g, err := sheet.NewGoogle(ctx, settings.GoogleCreds)
+		g, err := sheet.OpenGoogle(ctx, sheet.GoogleAuth{
+			CredsFile:       settings.GoogleCreds,
+			OAuthClientFile: settings.GoogleOAuthClient,
+			OAuthTokenFile:  settings.GoogleOAuthToken,
+		})
 		if err != nil {
 			out.Notes = append(out.Notes, fmt.Sprintf("google sheets unavailable (%v); degraded to Memory", err))
 			slog.Warn("google sheets unavailable; degraded to Memory", "err", err.Error())
 		} else {
 			sheetsStore = g
 			out.SheetsKind = "google"
+			if settings.GoogleOAuthToken != "" {
+				out.Notes = append(out.Notes, "sheets using user OAuth token (GOOGLE_OAUTH_TOKEN)")
+			}
 		}
 	}
 	if sheetsStore == nil {
@@ -66,7 +74,7 @@ func BuildStoreDetailed(ctx context.Context, settings config.Settings, feat feat
 		if out.SheetsKind == "" {
 			out.SheetsKind = "memory"
 		}
-		if settings.GoogleCreds == "" || !tryGoogle {
+		if !hasGoogle || !tryGoogle {
 			out.Notes = append(out.Notes, "sheets side using Memory (no Google credentials or FEATURE_SHEETS_GOOGLE off)")
 		}
 	}

@@ -111,7 +111,14 @@ go run ./cmd/sheetcreate -title "Alphabet 财务报表"
 
 终端只打印一个 `https://docs.google.com/spreadsheets/d/...` 链接。用你刚填的邮箱打开，能编辑就对了。然后把链接里 `/d/` 和后面 `/` 之间的那段 id，写进 `configs/companies.yaml` 里对应公司的 `spreadsheet_id`。
 
-如果 doctor 或建表报错里出现 quota，就是服务账号的网盘没有容量。不要换一个服务账号重试。等用户授权（浏览器里你本人点允许，文件直接建在你的网盘）做完之后再用那条路。这一步程序还没做。
+如果 doctor 或建表报错里出现 quota，就是服务账号的网盘没有容量。不要换一个服务账号重试。改用用户 OAuth（推荐）：
+
+1. 在同一 Cloud 项目创建「桌面应用」OAuth 客户端，下载 JSON。
+2. `.env` 写 `GOOGLE_OAUTH_CLIENT=/绝对路径/client_secret.json`
+3. 运行 `go run ./cmd/googleauth`，浏览器登录你本人的 Google 并允许访问表格。
+4. 把打印出的 token 路径写到 `GOOGLE_OAUTH_TOKEN=`（默认 `~/.config/earnings-sync/google-oauth-token.json`）。
+
+有 `GOOGLE_OAUTH_TOKEN` 时，程序优先用你的登录写表：你能打开的表格就能写，不必再把每张表手动共享给服务账号邮箱。服务账号 JSON 仍可保留给 CI / 无人值守场景。
 
 ## 5. 导入一次财报
 

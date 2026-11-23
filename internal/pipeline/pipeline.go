@@ -354,7 +354,7 @@ func (p *Pipeline) Watch(ctx context.Context, ticker string, dry bool) ([]*model
 			if !ok {
 				continue
 			}
-			if filing.Form == "8-K" {
+			if acquire.NeedsExhibit(filing.Form) {
 				if exhibit, err := acquire.ExhibitURL(ctx, p.Client, src.CIK, filing.Accession, p.SECUserAgent); err == nil && exhibit != "" {
 					filing.URL = exhibit
 				}
