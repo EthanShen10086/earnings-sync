@@ -49,4 +49,4 @@
 
 DeepSeek 导入时可以自己调用 `create_workbook`。Cursor 里同一套工具走 MCP `earnings-sync`。程序运行时走 Google API，不走 Cursor 自带的 Google Sheets MCP。
 
-服务账号自己的云端硬盘没有容量。如果创建失败并提到 quota，就不要继续用服务账号建表，改为用户授权（OAuth）：浏览器弹出同意页，你本人点允许，文件直接建在你的云端硬盘里。这一步还没做。
+服务账号自己的云端硬盘没有容量。如果创建失败并提到 quota，就不要继续用服务账号建表，改为用户授权（OAuth）：配置 `GOOGLE_OAUTH_CLIENT` 后运行 `go run ./cmd/googleauth`，浏览器弹出同意页，你本人点允许；token 写到 `GOOGLE_OAUTH_TOKEN`。之后写入走你本人的 Google 登录，不必再共享服务账号邮箱。

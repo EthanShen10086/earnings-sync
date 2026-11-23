@@ -47,17 +47,18 @@ type Flags struct {
 
 // Deps are optional connection strings / credential paths (placeholders OK when empty).
 type Deps struct {
-	RedisURL       string
-	MQURL          string
-	KafkaBrokers   string
-	ObjectEndpoint string
-	ObjectBucket   string
-	DiscoveryURL   string
-	Elasticsearch  string
-	FeishuWebhook  string
-	ModelAPIKey    string
-	GoogleCreds    string
-	OTLPEndpoint   string
+	RedisURL         string
+	MQURL            string
+	KafkaBrokers     string
+	ObjectEndpoint   string
+	ObjectBucket     string
+	DiscoveryURL     string
+	Elasticsearch    string
+	FeishuWebhook    string
+	ModelAPIKey      string
+	GoogleCreds      string
+	GoogleOAuthToken string
+	OTLPEndpoint     string
 }
 
 // Status is one resolved capability.
@@ -97,17 +98,18 @@ func FromEnv() (Flags, Deps) {
 			SheetsGoogle:  parseWant(os.Getenv("FEATURE_SHEETS_GOOGLE"), WantAuto),
 			OTelExport:    parseWant(os.Getenv("FEATURE_OTEL"), WantAuto),
 		}, Deps{
-			RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
-			MQURL:          strings.TrimSpace(firstEnv("MQ_URL", "AMQP_URL")),
-			KafkaBrokers:   strings.TrimSpace(os.Getenv("KAFKA_BROKERS")),
-			ObjectEndpoint: strings.TrimSpace(firstEnv("OBJECT_STORAGE_ENDPOINT", "S3_ENDPOINT")),
-			ObjectBucket:   strings.TrimSpace(firstEnv("OBJECT_STORAGE_BUCKET", "S3_BUCKET")),
-			DiscoveryURL:   strings.TrimSpace(firstEnv("DISCOVERY_URL", "NACOS_ADDR", "CONSUL_HTTP_ADDR", "EUREKA_URL")),
-			Elasticsearch:  strings.TrimSpace(firstEnv("ELASTICSEARCH_URL", "ES_URL")),
-			FeishuWebhook:  strings.TrimSpace(os.Getenv("FEISHU_WEBHOOK_URL")),
-			ModelAPIKey:    strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
-			GoogleCreds:    strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")),
-			OTLPEndpoint:   strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+			RedisURL:         strings.TrimSpace(os.Getenv("REDIS_URL")),
+			MQURL:            strings.TrimSpace(firstEnv("MQ_URL", "AMQP_URL")),
+			KafkaBrokers:     strings.TrimSpace(os.Getenv("KAFKA_BROKERS")),
+			ObjectEndpoint:   strings.TrimSpace(firstEnv("OBJECT_STORAGE_ENDPOINT", "S3_ENDPOINT")),
+			ObjectBucket:     strings.TrimSpace(firstEnv("OBJECT_STORAGE_BUCKET", "S3_BUCKET")),
+			DiscoveryURL:     strings.TrimSpace(firstEnv("DISCOVERY_URL", "NACOS_ADDR", "CONSUL_HTTP_ADDR", "EUREKA_URL")),
+			Elasticsearch:    strings.TrimSpace(firstEnv("ELASTICSEARCH_URL", "ES_URL")),
+			FeishuWebhook:    strings.TrimSpace(os.Getenv("FEISHU_WEBHOOK_URL")),
+			ModelAPIKey:      strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
+			GoogleCreds:      strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")),
+			GoogleOAuthToken: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_TOKEN")),
+			OTLPEndpoint:     strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 		}
 }
 
@@ -149,14 +151,16 @@ func Resolve(flags Flags, deps Deps) Bundle {
 
 	b.Report = append(b.Report, resolveCred("notify", flags.Notify, deps.FeishuWebhook != "", "FEISHU_WEBHOOK_URL"))
 	b.Report = append(b.Report, resolveCred("llm", flags.LLM, deps.ModelAPIKey != "", "DEEPSEEK_API_KEY"))
-	b.Report = append(b.Report, resolveCred("sheets_google", flags.SheetsGoogle, deps.GoogleCreds != "", "GOOGLE_APPLICATION_CREDENTIALS"))
+	hasSheets := deps.GoogleCreds != "" || deps.GoogleOAuthToken != ""
+	sheetsHint := "GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_OAUTH_TOKEN"
+	b.Report = append(b.Report, resolveCred("sheets_google", flags.SheetsGoogle, hasSheets, sheetsHint))
 	b.Report = append(b.Report, resolveCred("otel", flags.OTelExport, deps.OTLPEndpoint != "", "OTEL_EXPORTER_OTLP_ENDPOINT"))
 	return b
 }
 
 // UseGoogleSheets is true when Google Sheets should be attempted (creds present and not forced off).
 func (b Bundle) UseGoogleSheets() bool {
-	return wantLive(b.Flags.SheetsGoogle, b.Deps.GoogleCreds != "")
+	return wantLive(b.Flags.SheetsGoogle, b.Deps.GoogleCreds != "" || b.Deps.GoogleOAuthToken != "")
 }
 
 // UseLLM is true when a model provider should be wired (live key or forced-on stub).

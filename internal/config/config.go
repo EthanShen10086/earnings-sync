@@ -272,22 +272,25 @@ func replaceSpreadsheetID(src, ticker, id string) (string, error) {
 
 // Settings comes from the environment so secrets stay out of the repo.
 type Settings struct {
-	CompaniesFile   string
-	MacroFile       string
-	JobStorePath    string
-	ModelAPIKey     string
-	ModelBaseURL    string
-	ModelName       string
-	FeishuWebhook   string
-	FeishuSecret    string
-	GoogleCreds     string
-	GoogleShareWith string
-	OTLPEndpoint    string
-	SECUserAgent    string
-	DatabaseURL     string
-	StorageMode     string // sheets-only | pg-only | dual
-	StorageFail     string // all | partial
-	MigrationsDir   string
+	CompaniesFile     string
+	MacroFile         string
+	JobStorePath      string
+	ModelAPIKey       string
+	ModelBaseURL      string
+	ModelName         string
+	FeishuWebhook     string
+	FeishuSecret      string
+	GoogleCreds       string
+	GoogleShareWith   string
+	GoogleOAuthClient string // desktop OAuth client secret JSON
+	GoogleOAuthToken  string // saved user token JSON; preferred over service account
+
+	OTLPEndpoint  string
+	SECUserAgent  string
+	DatabaseURL   string
+	StorageMode   string // sheets-only | pg-only | dual
+	StorageFail   string // all | partial
+	MigrationsDir string
 
 	// Optional data-plane (Redis/MQ/objects/CDN/gateway/audit/search).
 	// Missing backends degrade; set InfraStrict to fail instead.
@@ -318,40 +321,42 @@ type Settings struct {
 func LoadSettings() Settings {
 	LoadDotEnv(".env")
 	return Settings{
-		CompaniesFile:    env("COMPANIES_FILE", "configs/companies.yaml"),
-		MacroFile:        env("MACRO_FILE", "configs/macro.yaml"),
-		JobStorePath:     env("JOB_STORE_PATH", "data/jobs.json"),
-		ModelAPIKey:      os.Getenv("DEEPSEEK_API_KEY"),
-		ModelBaseURL:     env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-		ModelName:        env("DEEPSEEK_MODEL", "deepseek-flash"),
-		FeishuWebhook:    os.Getenv("FEISHU_WEBHOOK_URL"),
-		FeishuSecret:     os.Getenv("FEISHU_WEBHOOK_SECRET"),
-		GoogleCreds:      os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		GoogleShareWith:  os.Getenv("GOOGLE_SHARE_WITH"),
-		OTLPEndpoint:     os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		SECUserAgent:     env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		StorageMode:      env("STORAGE_MODE", "sheets-only"),
-		StorageFail:      env("STORAGE_FAIL_POLICY", "all"),
-		MigrationsDir:    os.Getenv("MIGRATIONS_DIR"),
-		RedisURL:         os.Getenv("REDIS_URL"),
-		NATSURL:          os.Getenv("NATS_URL"),
-		ObjectStoreDir:   env("OBJECT_STORE_DIR", "data/objects"),
-		CDNBaseURL:       os.Getenv("CDN_BASE_URL"),
-		AuditLogPath:     env("AUDIT_LOG_PATH", "data/audit.jsonl"),
-		SearchIndexPath:  env("SEARCH_INDEX_PATH", "data/search"),
-		RateLimitRPS:     envFloat("RATE_LIMIT_RPS", 0),
-		RateLimitBurst:   envInt("RATE_LIMIT_BURST", 20),
-		InfraStrict:      envBool("INFRA_STRICT", false),
-		DiscoveryBackend: env("DISCOVERY_BACKEND", "memory"),
-		DiscoveryURL:     firstNonEmpty(os.Getenv("DISCOVERY_URL"), os.Getenv("NACOS_ADDR"), os.Getenv("CONSUL_HTTP_ADDR"), os.Getenv("EUREKA_URL")),
-		KafkaBrokers:     os.Getenv("KAFKA_BROKERS"),
-		KafkaEventLog:    env("KAFKA_EVENT_LOG", "data/kafka-events.jsonl"),
-		LogShipperPath:   env("LOG_SHIPPER_PATH", "data/logs/app.jsonl"),
-		ElasticsearchURL: firstNonEmpty(os.Getenv("ELASTICSEARCH_URL"), os.Getenv("ES_URL")),
-		AlertRulesPath:   env("ALERT_RULES_PATH", "deploy/alert-rules.yml"),
-		AuthMode:         env("AUTH_MODE", "bypass"),
-		AuthBearerToken:  os.Getenv("AUTH_BEARER_TOKEN"),
+		CompaniesFile:     env("COMPANIES_FILE", "configs/companies.yaml"),
+		MacroFile:         env("MACRO_FILE", "configs/macro.yaml"),
+		JobStorePath:      env("JOB_STORE_PATH", "data/jobs.json"),
+		ModelAPIKey:       os.Getenv("DEEPSEEK_API_KEY"),
+		ModelBaseURL:      env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		ModelName:         env("DEEPSEEK_MODEL", "deepseek-flash"),
+		FeishuWebhook:     os.Getenv("FEISHU_WEBHOOK_URL"),
+		FeishuSecret:      os.Getenv("FEISHU_WEBHOOK_SECRET"),
+		GoogleCreds:       os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		GoogleShareWith:   os.Getenv("GOOGLE_SHARE_WITH"),
+		GoogleOAuthClient: os.Getenv("GOOGLE_OAUTH_CLIENT"),
+		GoogleOAuthToken:  os.Getenv("GOOGLE_OAUTH_TOKEN"),
+		OTLPEndpoint:      os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		SECUserAgent:      env("SEC_USER_AGENT", "earnings-sync/0.1 (research; set SEC_USER_AGENT)"),
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		StorageMode:       env("STORAGE_MODE", "sheets-only"),
+		StorageFail:       env("STORAGE_FAIL_POLICY", "all"),
+		MigrationsDir:     os.Getenv("MIGRATIONS_DIR"),
+		RedisURL:          os.Getenv("REDIS_URL"),
+		NATSURL:           os.Getenv("NATS_URL"),
+		ObjectStoreDir:    env("OBJECT_STORE_DIR", "data/objects"),
+		CDNBaseURL:        os.Getenv("CDN_BASE_URL"),
+		AuditLogPath:      env("AUDIT_LOG_PATH", "data/audit.jsonl"),
+		SearchIndexPath:   env("SEARCH_INDEX_PATH", "data/search"),
+		RateLimitRPS:      envFloat("RATE_LIMIT_RPS", 0),
+		RateLimitBurst:    envInt("RATE_LIMIT_BURST", 20),
+		InfraStrict:       envBool("INFRA_STRICT", false),
+		DiscoveryBackend:  env("DISCOVERY_BACKEND", "memory"),
+		DiscoveryURL:      firstNonEmpty(os.Getenv("DISCOVERY_URL"), os.Getenv("NACOS_ADDR"), os.Getenv("CONSUL_HTTP_ADDR"), os.Getenv("EUREKA_URL")),
+		KafkaBrokers:      os.Getenv("KAFKA_BROKERS"),
+		KafkaEventLog:     env("KAFKA_EVENT_LOG", "data/kafka-events.jsonl"),
+		LogShipperPath:    env("LOG_SHIPPER_PATH", "data/logs/app.jsonl"),
+		ElasticsearchURL:  firstNonEmpty(os.Getenv("ELASTICSEARCH_URL"), os.Getenv("ES_URL")),
+		AlertRulesPath:    env("ALERT_RULES_PATH", "deploy/alert-rules.yml"),
+		AuthMode:          env("AUTH_MODE", "bypass"),
+		AuthBearerToken:   os.Getenv("AUTH_BEARER_TOKEN"),
 	}
 }
 
