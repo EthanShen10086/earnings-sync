@@ -75,6 +75,32 @@ func TestAllowedLineItemsStayWithTheCompany(t *testing.T) {
 	}
 }
 
+func TestPDDSegmentsConfigured(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	reg, err := Load(filepath.Join(filepath.Dir(file), "..", "..", "configs", "companies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdd, ok := reg.Get("PDD")
+	if !ok || pdd.FiscalYearEndMonth != 12 || len(pdd.Segments) != 2 {
+		t.Fatalf("%+v", pdd)
+	}
+	if pdd.Sources[0].Type != "sec_edgar" || pdd.Sources[0].CIK != "0001737806" {
+		t.Fatalf("sources %+v", pdd.Sources)
+	}
+	items := pdd.AllowedLineItems()
+	if !strings.Contains(items, "online_marketing_revenue") || !strings.Contains(items, "transaction_services_revenue") || strings.Contains(items, "iphone") {
+		t.Fatal(items)
+	}
+	cols := pdd.SegmentColumns()
+	if cols["online_marketing_revenue"] != "D" || cols["transaction_services_revenue"] != "E" {
+		t.Fatalf("%v", cols)
+	}
+	if !strings.Contains(pdd.Prompt, "US$") {
+		t.Fatal(pdd.Prompt)
+	}
+}
+
 func TestBerkshireUsesItsOwnCells(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	reg, err := Load(filepath.Join(filepath.Dir(file), "..", "..", "configs", "companies.yaml"))

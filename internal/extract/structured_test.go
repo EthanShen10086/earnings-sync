@@ -54,3 +54,34 @@ func TestStructuredKeepsEveryQuarter(t *testing.T) {
 		t.Fatalf("latest %+v", latest)
 	}
 }
+
+func TestPDDStructuredFixture(t *testing.T) {
+	b, err := os.ReadFile("../../testdata/pdd_2026q3.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, ok := TryStructuredAll(string(b), "pdd_2026q3.csv")
+	if !ok || len(all) != 2 {
+		t.Fatalf("periods %v %+v", ok, all)
+	}
+	if all[0].Period.Label() != "2026Q2" || all[1].Period.Label() != "2026Q3" {
+		t.Fatalf("order %+v %+v", all[0].Period, all[1].Period)
+	}
+	ex := all[1]
+	rev, _ := ex.Number("total_revenue")
+	mkt, _ := ex.Number("online_marketing_revenue")
+	txn, _ := ex.Number("transaction_services_revenue")
+	if rev < 16.1 || rev > 16.2 || mkt != 8.9 || txn != 7.2 {
+		t.Fatalf("rev %v mkt %v txn %v", rev, mkt, txn)
+	}
+	text := "fiscal_year,fiscal_quarter,line_item,value,unit\n2026,3,online_marketing_services_and_others,8.9,billion_usd\n2026,3,transaction_services,7.2,billion_usd\n"
+	alias, ok := TryStructured(text, "alias.csv")
+	if !ok {
+		t.Fatal("alias parse")
+	}
+	mkt, _ = alias.Number("online_marketing_revenue")
+	txn, _ = alias.Number("transaction_services_revenue")
+	if mkt != 8.9 || txn != 7.2 {
+		t.Fatalf("alias mkt %v txn %v", mkt, txn)
+	}
+}

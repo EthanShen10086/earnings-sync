@@ -26,14 +26,14 @@ func (g *Google) CreateWorkbook(ctx context.Context, credFile, title, shareWith 
 		},
 	}).Context(ctx).Do()
 	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "storageQuotaExceeded") || strings.Contains(msg, "does not have storage") {
+			return "", fmt.Errorf("创建表格失败：服务账号云端硬盘配额为 0。请用自己的 Google 账号新建三张表（利润表/资产负债表/现金流量表），共享给服务账号 JSON 里的 client_email（编辑者），再把 spreadsheet id 写进 configs/companies.yaml。原始错误：%w", err)
+		}
 		return "", fmt.Errorf("创建表格失败：%w。请确认这个 Cloud 项目已启用 Google Drive API。服务账号自己的云端硬盘没有容量时，需要把 GOOGLE_SHARE_WITH 设成你的邮箱，或改用用户授权", err)
 	}
-	_, err = g.svc.Spreadsheets.Values.BatchUpdate(ss.SpreadsheetId, &sheets.BatchUpdateValuesRequest{
-		ValueInputOption: "USER_ENTERED",
-		Data:             workbookValues(segments),
-	}).Context(ctx).Do()
-	if err != nil {
-		return ss.SpreadsheetId, fmt.Errorf("表已创建但表头写入失败：%w", err)
+	if err := g.writeWorkbookScaffold(ctx, ss.SpreadsheetId, segments); err != nil {
+		return ss.SpreadsheetId, err
 	}
 	if shareWith != "" {
 		if err := shareEdit(ctx, credFile, ss.SpreadsheetId, shareWith); err != nil {
@@ -41,6 +41,69 @@ func (g *Google) CreateWorkbook(ctx context.Context, credFile, title, shareWith 
 		}
 	}
 	return ss.SpreadsheetId, nil
+}
+
+// EnsureWorkbook prepares an existing spreadsheet for quarterly ingest.
+// The first tab (gid/index 0) becomes 利润表; 资产负债表 and 现金流量表 are added if missing.
+// Headers and period formulas are written. It does not create a new spreadsheet file.
+func (g *Google) EnsureWorkbook(ctx context.Context, spreadsheetID string, segments []config.Segment) error {
+	if spreadsheetID == "" {
+		return fmt.Errorf("spreadsheet id 为空")
+	}
+	ss, err := g.svc.Spreadsheets.Get(spreadsheetID).Fields("sheets(properties(sheetId,title,index))").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("打不开表格：%w。把表格共享给服务账号 JSON 里的 client_email，权限选编辑者", err)
+	}
+	if len(ss.Sheets) == 0 {
+		return fmt.Errorf("表格没有任何工作表")
+	}
+	byTitle := map[string]*sheets.SheetProperties{}
+	var first *sheets.SheetProperties
+	for _, sh := range ss.Sheets {
+		p := sh.Properties
+		byTitle[p.Title] = p
+		if p.Index == 0 {
+			first = p
+		}
+	}
+	if first == nil {
+		first = ss.Sheets[0].Properties
+	}
+	var reqs []*sheets.Request
+	if _, ok := byTitle["利润表"]; !ok {
+		reqs = append(reqs, &sheets.Request{UpdateSheetProperties: &sheets.UpdateSheetPropertiesRequest{
+			Properties: &sheets.SheetProperties{SheetId: first.SheetId, Title: "利润表"},
+			Fields:     "title",
+		}})
+		delete(byTitle, first.Title)
+		byTitle["利润表"] = first
+	}
+	for _, name := range []string{"资产负债表", "现金流量表"} {
+		if _, ok := byTitle[name]; ok {
+			continue
+		}
+		reqs = append(reqs, &sheets.Request{AddSheet: &sheets.AddSheetRequest{
+			Properties: &sheets.SheetProperties{Title: name},
+		}})
+	}
+	if len(reqs) > 0 {
+		_, err = g.svc.Spreadsheets.BatchUpdate(spreadsheetID, &sheets.BatchUpdateSpreadsheetRequest{Requests: reqs}).Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("整理工作表失败：%w", err)
+		}
+	}
+	return g.writeWorkbookScaffold(ctx, spreadsheetID, segments)
+}
+
+func (g *Google) writeWorkbookScaffold(ctx context.Context, spreadsheetID string, segments []config.Segment) error {
+	_, err := g.svc.Spreadsheets.Values.BatchUpdate(spreadsheetID, &sheets.BatchUpdateValuesRequest{
+		ValueInputOption: "USER_ENTERED",
+		Data:             workbookValues(segments),
+	}).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("表头写入失败：%w", err)
+	}
+	return nil
 }
 
 func shareEdit(ctx context.Context, credFile, spreadsheetID, email string) error {

@@ -109,6 +109,58 @@ func TestEarningsReleaseBeatsOlder10Q(t *testing.T) {
 	}
 }
 
+func TestForeignIssuer6KAnd20F(t *testing.T) {
+	body := []byte(`{"filings":{"recent":{
+		"accessionNumber":["0001737806-26-000010","0001737806-26-000008","0001737806-26-000005"],
+		"form":["6-K","6-K","20-F"],
+		"filingDate":["2026-11-19","2026-10-01","2026-04-29"],
+		"reportDate":["2026-11-19","2026-10-01","2025-12-31"],
+		"primaryDocument":["cover.htm","other.htm","pdd-20251231x20f.htm"],
+		"items":["","",""]
+	}}}`)
+	f, ok, err := parseFinancials(body, "1737806", 12)
+	if err != nil || !ok || f.Form != "6-K" || f.Accession != "0001737806-26-000010" {
+		t.Fatalf("earnings candidate %+v %v %v", f, ok, err)
+	}
+	periodic, ok, err := parsePeriodicOnly(body, "1737806", 12)
+	if err != nil || !ok || periodic.Form != "20-F" || periodic.Period.Label() != "2025Q4" {
+		t.Fatalf("periodic %+v %v %v", periodic, ok, err)
+	}
+	if !NeedsExhibit("6-K") || NeedsExhibit("20-F") {
+		t.Fatal("NeedsExhibit mismatch")
+	}
+
+	oldArchive := ArchiveRoot
+	defer func() { ArchiveRoot = oldArchive }()
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	ArchiveRoot = srv.URL
+	mux.HandleFunc("/1737806/000173780626000010/index.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"directory":{"item":[
+			{"name":"cover.htm","size":"1000"},
+			{"name":"tm-ex99-1.htm","size":"200000"}
+		]}}`))
+	})
+	mux.HandleFunc("/1737806/000173780626000010/tm-ex99-1.htm", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`PDD Holdings Announces Third Quarter 2026 Unaudited Financial Results. Total revenues were RMB108.3 billion.`))
+	})
+	mux.HandleFunc("/1737806/000173780626000008/index.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"directory":{"item":[{"name":"ex99-1.htm","size":"5000"}]}}`))
+	})
+	mux.HandleFunc("/1737806/000173780626000008/ex99-1.htm", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`This Form 6-K furnishes a share repurchase update. No financial results.`))
+	})
+	mux.HandleFunc("/submissions/CIK0001737806.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	})
+
+	got, ok, err := LatestFinancials(context.Background(), srv.Client(), srv.URL, "0001737806", "earnings-sync-test", 12)
+	if err != nil || !ok || got.Form != "6-K" || !strings.Contains(got.URL, "tm-ex99-1.htm") {
+		t.Fatalf("latest foreign %+v %v %v", got, ok, err)
+	}
+}
+
 func TestStatementTextKeepsRows(t *testing.T) {
 	html := `<html><body><p>Apple reports fourth quarter results</p><table><tr><td>Cash and cash equivalents</td><td>36,305</td></tr></table></body></html>`
 	text := StatementText(html)

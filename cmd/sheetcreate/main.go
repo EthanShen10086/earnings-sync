@@ -16,23 +16,11 @@ func main() {
 	title := flag.String("title", "", "新表格标题。空着时用公司名或宏观序列标题")
 	ticker := flag.String("ticker", "", "公司代码。给出后用它的分部做表头，并把 spreadsheet id 写回配置")
 	series := flag.String("series", "", "宏观序列，例如 CN。给出后建「宏观」表，并把 spreadsheet id 写回配置")
+	existing := flag.String("existing", "", "已有 spreadsheet id。不新建文件，只在该表整理三张工作表并写表头")
 	flag.Parse()
 	settings := config.LoadSettings()
 	if settings.GoogleCreds == "" {
 		fmt.Fprintln(os.Stderr, "还没有服务账号。先看 docs/google-sheets-setup.md，再跑 go run ./cmd/doctor")
-		os.Exit(1)
-	}
-	if settings.GoogleShareWith == "" {
-		fmt.Fprintln(os.Stderr, `还不能建表。请按顺序做这两步，完整说明在 docs/connect.md 第 4 节。
-
-1. 用创建服务账号的 Google 账号打开 Google Drive API 页面并点「启用」：
-   https://console.cloud.google.com/apis/library/drive.googleapis.com
-   页面最上方要是服务账号所在的项目。不要再下载新的 JSON。
-2. 打开项目根目录的 .env，找到 GOOGLE_SHARE_WITH=
-   等号右边写你登录 https://docs.google.com 时右上角的邮箱，例如 GOOGLE_SHARE_WITH=name@gmail.com
-   不要填 JSON 里的 client_email。保存后不要把这一行发出来。
-
-然后运行 go run ./cmd/doctor，看到「新建表格」通过后再执行本命令。`)
 		os.Exit(1)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
@@ -47,6 +35,10 @@ func main() {
 		os.Exit(1)
 	}
 	if *series != "" {
+		if settings.GoogleShareWith == "" && *existing == "" {
+			fmt.Fprintln(os.Stderr, shareWithHint())
+			os.Exit(1)
+		}
 		createMacro(ctx, g, settings, *series, *title)
 		return
 	}
@@ -70,6 +62,30 @@ func main() {
 		if *title == "" {
 			*title = company.Name + " 财务报表"
 		}
+		if *existing == "" && company.SpreadsheetID != "" {
+			*existing = company.SpreadsheetID
+		}
+	}
+	if *existing != "" {
+		if err := g.EnsureWorkbook(ctx, *existing, segments); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if *ticker != "" {
+			if err := reg.SetSpreadsheet(*ticker, *existing); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Printf("已在现有表格整理表头，并确认 %s 的 spreadsheet_id。\n", strings.ToUpper(*ticker))
+		} else {
+			fmt.Println("已在现有表格整理三张工作表并写入表头。")
+		}
+		fmt.Println("https://docs.google.com/spreadsheets/d/" + *existing)
+		return
+	}
+	if settings.GoogleShareWith == "" {
+		fmt.Fprintln(os.Stderr, shareWithHint())
+		os.Exit(1)
 	}
 	if *title == "" {
 		*title = "财务报表"
@@ -93,6 +109,20 @@ func main() {
 		fmt.Println("已创建。打开后确认你能编辑，再把 spreadsheet id 写进 configs/companies.yaml。")
 	}
 	fmt.Println("https://docs.google.com/spreadsheets/d/" + id)
+}
+
+func shareWithHint() string {
+	return `还不能建表。请按顺序做这两步，完整说明在 docs/connect.md 第 4 节。
+
+1. 用创建服务账号的 Google 账号打开 Google Drive API 页面并点「启用」：
+   https://console.cloud.google.com/apis/library/drive.googleapis.com
+   页面最上方要是服务账号所在的项目。不要再下载新的 JSON。
+2. 打开项目根目录的 .env，找到 GOOGLE_SHARE_WITH=
+   等号右边写你登录 https://docs.google.com 时右上角的邮箱，例如 GOOGLE_SHARE_WITH=name@gmail.com
+   不要填 JSON 里的 client_email。保存后不要把这一行发出来。
+
+然后运行 go run ./cmd/doctor，看到「新建表格」通过后再执行本命令。
+若表格已经建好，用 -existing <spreadsheet_id> 只整理表头，不新建文件。`
 }
 
 func createMacro(ctx context.Context, g *sheet.Google, settings config.Settings, id, title string) {

@@ -146,6 +146,80 @@ func TestDryRunDoesNotBlockRealWrite(t *testing.T) {
 	}
 }
 
+func TestPDDFixtureWritesSegments(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "pdd_2026q3.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "companies.yaml")
+	raw := []byte(`companies:
+  - ticker: PDD
+    name: PDD Holdings
+    fiscal_year_end_month: 12
+    spreadsheet_id: pdd-sheet-1
+    segments:
+      - key: online_marketing_revenue
+        column: D
+        header: 在线营销及其他_十亿美元
+      - key: transaction_services_revenue
+        column: E
+        header: 交易服务_十亿美元
+    sources:
+      - type: sec_edgar
+        cik: "0001737806"
+`)
+	if err := os.WriteFile(cfg, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := config.Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := job.Open(filepath.Join(dir, "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := &sheet.Memory{}
+	note := &capture{}
+	p := &Pipeline{Companies: reg, Jobs: store, Sheets: mem, Notifier: note, Obs: observe.New()}
+	job, err := p.Ingest(context.Background(), Request{Ticker: "PDD", Filename: "pdd_2026q3.csv", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != "succeeded" || job.Extraction == nil || job.Extraction.Period.Label() != "2026Q3" {
+		t.Fatalf("job %+v", job)
+	}
+	ex := job.Extraction
+	if ex.Columns["online_marketing_revenue"] != "D" || ex.Columns["transaction_services_revenue"] != "E" {
+		t.Fatalf("columns %+v", ex.Columns)
+	}
+	mkt, _ := ex.Number("online_marketing_revenue")
+	txn, _ := ex.Number("transaction_services_revenue")
+	rev, _ := ex.Number("total_revenue")
+	if mkt != 8.9 || txn != 7.2 || rev < 16.1 || rev > 16.2 {
+		t.Fatalf("facts mkt=%v txn=%v rev=%v", mkt, txn, rev)
+	}
+	if len(mem.Writes) < 10 {
+		t.Fatalf("expected segment/total cells written, got %d", len(mem.Writes))
+	}
+	var sawMarketing, sawTxn bool
+	for _, w := range mem.Writes {
+		if w.Sheet == "利润表" && w.A1 == "D5" && w.Value == 8.9 {
+			sawMarketing = true
+		}
+		if w.Sheet == "利润表" && w.A1 == "E5" && w.Value == 7.2 {
+			sawTxn = true
+		}
+	}
+	if !sawMarketing || !sawTxn {
+		t.Fatalf("segment cells missing: %+v", mem.Writes)
+	}
+	if note.n != 1 || !job.Notified {
+		t.Fatalf("notify %d job %+v", note.n, job)
+	}
+}
+
 func TestWatchUsesLatestFilingOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/submissions/") {

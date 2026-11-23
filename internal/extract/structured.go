@@ -128,6 +128,10 @@ func normalizeItem(s string) string {
 		return "services_revenue"
 	case "wearables", "wearables_home_and_accessories":
 		return "wearables_revenue"
+	case "online_marketing", "online_marketing_services", "online_marketing_services_and_others":
+		return "online_marketing_revenue"
+	case "transaction_services":
+		return "transaction_services_revenue"
 	case "gross_margin_pct", "gross_margin_percent":
 		return "gross_margin"
 	case "eps", "diluted_eps_usd":
